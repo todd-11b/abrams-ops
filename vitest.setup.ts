@@ -5,4 +5,4 @@ import.meta.env.VITE_GHL_STAGE_JOB_CREATED = 'test-stage-jc';
 import.meta.env.VITE_GHL_STAGE_SCHEDULED = 'test-stage-sched';
 import.meta.env.VITE_GHL_STAGE_IN_INSTALL = 'test-stage-install';
 import.meta.env.VITE_GHL_STAGE_JOB_COMPLETE = 'test-stage-complete';
-import.meta.env.VITE_GHL_TODD_PHONE = '+15555550000';
+import.meta.env.VITE_GHL_TODD_CONTACT_ID = 'TestContactId12345678';

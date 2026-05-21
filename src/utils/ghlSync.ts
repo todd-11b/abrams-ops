@@ -47,7 +47,7 @@ export async function sendBlockSms(ctx: BlockSmsContext) {
     `Address: ${ctx.address}\n` +
     `Open: abramsfence.com/production/job/${ctx.jobId}`;
   try {
-    await crmApi.sendSms(productionEnv.toddPhone, body);
+    await crmApi.sendSms(productionEnv.toddContactId, body);
   } catch (err) {
     console.error('[ghlSync] sendBlockSms failed:', err);
   }
@@ -69,7 +69,7 @@ export async function sendHighSeverityIssueSms(ctx: IssueSmsContext) {
     `Address: ${ctx.address}\n` +
     `Open: abramsfence.com/production/job/${ctx.jobId}`;
   try {
-    await crmApi.sendSms(productionEnv.toddPhone, body);
+    await crmApi.sendSms(productionEnv.toddContactId, body);
   } catch (err) {
     console.error('[ghlSync] sendHighSeverityIssueSms failed:', err);
   }

@@ -152,15 +152,16 @@ export const crmApi = {
     return jsonOrThrow(res, 'moveOpportunityToStage');
   },
 
-  async sendSms(toNumber: string, body: string) {
-    if (!locationId) throw new Error('VITE_GHL_LOCATION_ID required for sendSms');
+  async sendSms(contactId: string, body: string) {
+    // GHL v2 conversations/messages requires an existing contactId — it does not accept
+    // a raw toNumber. Internal alerts target a pre-created contact whose id is stored in
+    // VITE_GHL_TODD_CONTACT_ID.
     const res = await fetch(`${GHL_BASE}/conversations/messages`, {
       method: 'POST',
       headers: jsonHeaders(),
       body: JSON.stringify({
         type: 'SMS',
-        locationId,
-        toNumber,
+        contactId,
         message: body,
       }),
     });
