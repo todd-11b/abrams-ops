@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 .vercel
 .env*.local
+
+# Supabase CLI link state
+supabase/.temp/
+supabase/.branches/
