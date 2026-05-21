@@ -23,7 +23,15 @@ function formatRelative(iso: string): string {
   return `${days}d ago`;
 }
 
-function IssueRow({ issue, onResolve }: { issue: JobIssue; onResolve: (id: string, note: string) => Promise<void> }) {
+function IssueRow({
+  issue,
+  photoUrls,
+  onResolve,
+}: {
+  issue: JobIssue;
+  photoUrls: Record<string, string>;
+  onResolve: (id: string, note: string) => Promise<void>;
+}) {
   const [showResolve, setShowResolve] = useState(false);
   const [note, setNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -51,7 +59,29 @@ function IssueRow({ issue, onResolve }: { issue: JobIssue; onResolve: (id: strin
           )}
           {issue.note && <div className="text-slate-700 mt-1">{issue.note}</div>}
           {issue.photos.length > 0 && (
-            <div className="text-xs text-slate-500 mt-1">{issue.photos.length} photo{issue.photos.length === 1 ? '' : 's'}</div>
+            <div className="mt-2 flex gap-2 flex-wrap">
+              {issue.photos.map((pid) => {
+                const url = photoUrls[pid];
+                if (!url) {
+                  return (
+                    <div key={pid} className="w-16 h-16 bg-slate-100 rounded border border-slate-200 flex items-center justify-center text-xs text-slate-400">
+                      …
+                    </div>
+                  );
+                }
+                return (
+                  <a
+                    key={pid}
+                    href={url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block w-16 h-16 rounded border border-slate-200 overflow-hidden bg-slate-100"
+                  >
+                    <img src={url} alt="issue photo" className="w-full h-full object-cover" loading="lazy" />
+                  </a>
+                );
+              })}
+            </div>
           )}
           <div className="text-xs text-slate-400 mt-1">{formatRelative(issue.created_at)}</div>
         </div>
@@ -86,7 +116,7 @@ function IssueRow({ issue, onResolve }: { issue: JobIssue; onResolve: (id: strin
 }
 
 export function OpenIssuesPanel({ jobId }: Props) {
-  const { open, resolve, loading } = useJobIssues(jobId);
+  const { open, photoUrls, resolve, loading } = useJobIssues(jobId);
 
   if (loading) return null;
   if (open.length === 0) return null;
@@ -98,7 +128,7 @@ export function OpenIssuesPanel({ jobId }: Props) {
       </h2>
       <div className="space-y-2">
         {open.map((i) => (
-          <IssueRow key={i.issue_id} issue={i} onResolve={resolve} />
+          <IssueRow key={i.issue_id} issue={i} photoUrls={photoUrls} onResolve={resolve} />
         ))}
       </div>
     </section>
