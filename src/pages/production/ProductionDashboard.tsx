@@ -1,11 +1,13 @@
 import { useMemo } from 'react';
 import { useJobs } from '../../hooks/useJobs';
+import { useOpenIssueCounts } from '../../hooks/useOpenIssueCounts';
 import { JobCard } from '../../components/production/JobCard';
 import { ViewToggle, useProductionView } from '../../components/production/ViewToggle';
 import type { Job } from '../../types/production';
 
 export default function ProductionDashboard() {
   const { jobs, loading, error } = useJobs();
+  const { countsByJob } = useOpenIssueCounts();
   const [view, setView] = useProductionView();
 
   const sorted = useMemo<Job[]>(() => {
@@ -37,7 +39,7 @@ export default function ProductionDashboard() {
         {!loading && sorted.length === 0 && (
           <div className="text-slate-500 text-center py-12">No active jobs yet.</div>
         )}
-        {sorted.map((j) => <JobCard key={j.job_id} job={j} />)}
+        {sorted.map((j) => <JobCard key={j.job_id} job={j} openIssueCount={countsByJob[j.job_id] ?? 0} />)}
       </main>
     </div>
   );

@@ -3,14 +3,14 @@ import { StatusBadge } from './StatusBadge';
 import { StagePill } from './StagePill';
 import type { Job } from '../../types/production';
 
-interface Props { job: Job; daysBlocked?: number; }
+interface Props { job: Job; openIssueCount?: number; }
 
 function daysSince(iso: string | null): number | null {
   if (!iso) return null;
   return Math.floor((Date.now() - new Date(iso).getTime()) / 86400_000);
 }
 
-export function JobCard({ job }: Props) {
+export function JobCard({ job, openIssueCount = 0 }: Props) {
   const daysBlocked = job.blocked_at ? daysSince(job.blocked_at) ?? 0 : 0;
   const depositOverdue = job.deposit_status === 'unpaid'
     && (daysSince(job.created_at) ?? 0) >= 3;
@@ -28,10 +28,15 @@ export function JobCard({ job }: Props) {
     >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="font-semibold text-slate-900">{job.job_number}</span>
             <StatusBadge status={job.status} />
             <StagePill stage={job.stage} />
+            {openIssueCount > 0 && (
+              <span className="inline-block rounded-full bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 text-xs font-semibold">
+                🚩 {openIssueCount} open
+              </span>
+            )}
           </div>
           <div className="text-sm text-slate-600">
             {job.install_date ? `Install: ${job.install_date}` : 'Unscheduled'}

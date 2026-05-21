@@ -8,6 +8,7 @@ import { FlagIssueModal } from '../../components/production/FlagIssueModal';
 import { BlockedModal } from '../../components/production/BlockedModal';
 import { CompleteConfirmModal } from '../../components/production/CompleteConfirmModal';
 import { PhotoUpload } from '../../components/production/PhotoUpload';
+import { OpenIssuesPanel } from '../../components/production/OpenIssuesPanel';
 import { CHECKLIST_TEMPLATE } from '../../utils/checklistTemplate';
 import { supabase } from '../../lib/supabase';
 import { crmApi } from '../../lib/crm-api';
@@ -84,6 +85,7 @@ export default function ProductionJob() {
       >🚩 Flag Issue</button>
 
       <main className="p-3 space-y-3">
+        <OpenIssuesPanel jobId={jobId} />
         {CHECKLIST_TEMPLATE.map((sec) => (
           <ChecklistSection
             key={sec.section}
