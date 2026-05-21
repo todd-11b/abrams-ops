@@ -29,8 +29,8 @@ export default function ProductionJob() {
   const [completeOpen, setCompleteOpen] = useState(false);
   const [photosByPhase, setPhotosByPhase] = useState<Record<string, boolean>>({});
   const [contactCard, setContactCard] = useState<{ name: string; address: string }>({
-    name: '…',
-    address: '…',
+    name: '',
+    address: '',
   });
 
   useEffect(() => {
@@ -40,13 +40,13 @@ export default function ProductionJob() {
       .then((resp) => {
         const c = (resp as { contact?: { firstName?: string; lastName?: string; address1?: string } }).contact ?? {};
         setContactCard({
-          name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || '(no name)',
-          address: c.address1 || '(no address)',
+          name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim(),
+          address: c.address1 ?? '',
         });
       })
       .catch((err) => {
         console.error('[ProductionJob] getContact failed:', err);
-        setContactCard({ name: '(name unavailable)', address: '(address unavailable)' });
+        setContactCard({ name: '', address: '' });
       });
   }, [job]);
 

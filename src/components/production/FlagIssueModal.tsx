@@ -29,6 +29,7 @@ export function FlagIssueModal({ jobId, contactId, jobNumber, section, onClose }
   const [note, setNote] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
@@ -36,13 +37,30 @@ export function FlagIssueModal({ jobId, contactId, jobNumber, section, onClose }
     setSubmitting(true);
     try {
       await create({ job_id: jobId, contact_id: contactId, type, severity, note, photos, section, jobNumber });
-      onClose();
+      setSaved(true);
+      // Hold the success flash long enough to register, then close and scroll
+      // to the top so the new entry in the Open Issues panel is in view.
+      setTimeout(() => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        onClose();
+      }, 700);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to create issue');
-    } finally {
       setSubmitting(false);
     }
   };
+
+  if (saved) {
+    return (
+      <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+        <div className="bg-white rounded-lg w-full max-w-md p-6 flex flex-col items-center space-y-3">
+          <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-2xl">✅</div>
+          <div className="font-semibold text-emerald-700">Issue flagged</div>
+          <div className="text-xs text-slate-500">Logged at {new Date().toLocaleTimeString()}</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
