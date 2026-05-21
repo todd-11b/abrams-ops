@@ -74,6 +74,7 @@ export default function ProductionJob() {
             photoUploaded={!!photosByPhase[sec.section]}
             onToggle={toggle}
             onSkip={skip}
+            onFlagIssueHere={() => { setIssueSection(sec.section); setIssueOpen(true); }}
             photoUploadSlot={
               sec.photo_description ? (
                 <PhotoUpload

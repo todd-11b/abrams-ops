@@ -9,10 +9,11 @@ interface Props {
   photoUploaded: boolean;
   onToggle: (id: string, checked: boolean) => Promise<void>;
   onSkip: (id: string, reason: string) => Promise<void>;
+  onFlagIssueHere?: () => void;
   photoUploadSlot?: ReactNode;
 }
 
-export function ChecklistSection({ title, photoDescription, items, photoUploaded, onToggle, onSkip, photoUploadSlot }: Props) {
+export function ChecklistSection({ title, photoDescription, items, photoUploaded, onToggle, onSkip, onFlagIssueHere, photoUploadSlot }: Props) {
   const [open, setOpen] = useState(true);
   const done = items.length > 0 && items.every((i) => i.checked || i.skipped);
   const photoOk = !photoDescription || photoUploaded;
@@ -40,6 +41,14 @@ export function ChecklistSection({ title, photoDescription, items, photoUploaded
               ) : (
                 photoUploadSlot
               )}
+            </div>
+          )}
+          {onFlagIssueHere && (
+            <div className="mt-2 pt-2 border-t">
+              <button
+                onClick={onFlagIssueHere}
+                className="text-xs text-rose-700 underline"
+              >🚩 Flag issue in this section</button>
             </div>
           )}
         </div>
