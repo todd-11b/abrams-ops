@@ -41,4 +41,17 @@ describe('validateProductionEnv', () => {
     expect(cfg.stages.job_created).toBe('s1');
     expect(cfg.toddPhone).toBe('+18168256198');
   });
+
+  it('throws when a required var is whitespace-only', () => {
+    expect(() =>
+      validateProductionEnv({
+        VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID: '   ',
+        VITE_GHL_STAGE_JOB_CREATED: 's1',
+        VITE_GHL_STAGE_SCHEDULED: 's2',
+        VITE_GHL_STAGE_IN_INSTALL: 's3',
+        VITE_GHL_STAGE_JOB_COMPLETE: 's4',
+        VITE_GHL_TODD_PHONE: '+18168256198',
+      })
+    ).toThrow(/VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID/);
+  });
 });

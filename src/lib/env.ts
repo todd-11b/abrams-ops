@@ -9,7 +9,7 @@ export interface ProductionEnvConfig {
   toddPhone: string;
 }
 
-interface RawEnv {
+interface RawEnv extends Record<string, string | undefined> {
   VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID?: string;
   VITE_GHL_STAGE_JOB_CREATED?: string;
   VITE_GHL_STAGE_SCHEDULED?: string;
@@ -53,5 +53,5 @@ export function validateProductionEnv(env: RawEnv): ProductionEnvConfig {
 }
 
 export const productionEnv = validateProductionEnv(
-  import.meta.env as unknown as RawEnv
+  import.meta.env as RawEnv
 );
