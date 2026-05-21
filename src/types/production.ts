@@ -46,6 +46,7 @@ export interface Job {
   scheduled_start_window: ScheduledStartWindow | null;
   deposit_status: DepositStatus;
   deposit_paid_at: string | null;
+  signed_at: string | null;
   blocked_reason: string | null;
   blocked_note: string | null;
   blocked_at: string | null;
