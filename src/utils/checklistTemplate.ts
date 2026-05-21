@@ -74,6 +74,8 @@ export const CHECKLIST_TEMPLATE: TemplateSection[] = [
     title: 'Final Walkthrough',
     photo_description: null,
     items: [
+      { item_id: 'walk_post_plumb', label: 'Post plumb verified', skippable: false, photo_required: false },
+      { item_id: 'walk_straight_line', label: 'Straight line confirmed', skippable: false, photo_required: false },
       { item_id: 'walk_gate_hardware_tight', label: 'All gate hardware tight', skippable: true, photo_required: false },
       { item_id: 'walk_gates_swing', label: 'Gates swing and latch correctly', skippable: true, photo_required: false },
       { item_id: 'walk_gate_video', label: 'Gate video recorded', skippable: true, photo_required: false },

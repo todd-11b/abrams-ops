@@ -8,9 +8,9 @@ describe('CHECKLIST_TEMPLATE', () => {
     ]);
   });
 
-  it('has 30 items total across all sections', () => {
+  it('has 32 items total across all sections', () => {
     const total = CHECKLIST_TEMPLATE.reduce((n, s) => n + s.items.length, 0);
-    expect(total).toBe(30);
+    expect(total).toBe(32);
   });
 
   it('marks Phase 5 install as skippable', () => {
@@ -30,9 +30,9 @@ describe('CHECKLIST_TEMPLATE', () => {
 });
 
 describe('buildChecklistRowsForJob', () => {
-  it('returns 30 rows tagged with job_id', () => {
+  it('returns 32 rows tagged with job_id', () => {
     const rows = buildChecklistRowsForJob('job-uuid-123');
-    expect(rows).toHaveLength(30);
+    expect(rows).toHaveLength(32);
     expect(rows.every((r) => r.job_id === 'job-uuid-123')).toBe(true);
   });
 
