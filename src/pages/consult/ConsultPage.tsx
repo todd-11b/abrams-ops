@@ -1,8 +1,26 @@
+import { useState, useEffect } from 'react';
+import { ConsultApp } from '../../components/consult/ConsultApp';
+import { PinGate } from '../../components/consult/PinGate';
+
+const SESSION_KEY = 'abrams_consult_unlocked';
+
 export default function ConsultPage() {
-  return (
-    <div className="min-h-screen bg-white p-8">
-      <h1 className="text-2xl font-semibold text-primary">Consult</h1>
-      <p className="mt-2 text-gray-600">Awaiting migration of consult files from GHL AI Studio.</p>
-    </div>
-  );
+  const [unlocked, setUnlocked] = useState(false);
+
+  useEffect(() => {
+    if (sessionStorage.getItem(SESSION_KEY) === 'true') setUnlocked(true);
+  }, []);
+
+  if (!unlocked) {
+    return (
+      <PinGate
+        onUnlock={() => {
+          sessionStorage.setItem(SESSION_KEY, 'true');
+          setUnlocked(true);
+        }}
+      />
+    );
+  }
+
+  return <ConsultApp />;
 }
