@@ -13,7 +13,7 @@ export type JobStatus = 'active' | 'blocked' | 'needs_office_review' | 'complete
 
 export type ScheduledStartWindow = 'morning' | 'afternoon' | 'all_day';
 
-export type DepositStatus = 'unpaid' | 'paid';
+export type DepositStatus = 'unpaid' | 'paid' | 'pending_invoice';
 
 export type ChecklistSectionKey = 'loadout' | 'onsite' | 'install' | 'clean' | 'walkthrough';
 
