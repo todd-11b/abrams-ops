@@ -74,6 +74,40 @@ const PaymentForm = ({ form, totals, onBack }: { form: ConsultFormData, totals: 
         }).catch(() => {});
       }
 
+      // Fire-and-forget: create a job record after deposit clears
+      try {
+        const totalLf = form.fenceLines.reduce((sum, l) => sum + (l.linearFeet || 0), 0);
+        const resp = await fetch('/api/proposal/create-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contact_id: form.contactId,
+            proposal_opportunity_id: form.opportunityId || null,
+            fence_spec: {
+              fence_lines: form.fenceLines,
+              gates: form.gateInstances,
+              addons: [
+                ...(form.addOns.demo.enabled ? [{ type: 'demo', ...form.addOns.demo }] : []),
+                ...(form.addOns.stain.enabled ? [{ type: 'stain', ...form.addOns.stain }] : []),
+                ...(form.addOns.poolLatch.enabled ? [{ type: 'poolLatch', ...form.addOns.poolLatch }] : []),
+              ],
+              total_sections: totals.totalSections,
+              total_lf: totalLf,
+              proposal_total: totals.grandTotal,
+            },
+          }),
+        });
+        if (!resp.ok) {
+          const t = await resp.text().catch(() => '');
+          console.error('[SignPayView] create-job failed:', resp.status, t);
+        } else {
+          const created = await resp.json();
+          console.log('[SignPayView] job created:', created.job_number);
+        }
+      } catch (err) {
+        console.error('[SignPayView] create-job network failure:', err);
+      }
+
       setSuccess(true);
     } catch {
       setError("Payment processing failed. Please try again.");
