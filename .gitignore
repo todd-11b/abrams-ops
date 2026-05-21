@@ -28,3 +28,4 @@ dist-ssr
 # Supabase CLI link state
 supabase/.temp/
 supabase/.branches/
+.env*
