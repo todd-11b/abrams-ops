@@ -142,4 +142,28 @@ export const crmApi = {
     const res = await fetch(url, { headers: jsonHeaders() });
     return jsonOrThrow(res, 'getPipelines');
   },
+
+  async moveOpportunityToStage(opportunityId: string, pipelineStageId: string) {
+    const res = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+      method: 'PUT',
+      headers: jsonHeaders(),
+      body: JSON.stringify({ pipelineStageId }),
+    });
+    return jsonOrThrow(res, 'moveOpportunityToStage');
+  },
+
+  async sendSms(toNumber: string, body: string) {
+    if (!locationId) throw new Error('VITE_GHL_LOCATION_ID required for sendSms');
+    const res = await fetch(`${GHL_BASE}/conversations/messages`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+      body: JSON.stringify({
+        type: 'SMS',
+        locationId,
+        toNumber,
+        message: body,
+      }),
+    });
+    return jsonOrThrow(res, 'sendSms');
+  },
 };
