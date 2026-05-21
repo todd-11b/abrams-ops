@@ -10,6 +10,7 @@ import { CompleteConfirmModal } from '../../components/production/CompleteConfir
 import { PhotoUpload } from '../../components/production/PhotoUpload';
 import { CHECKLIST_TEMPLATE } from '../../utils/checklistTemplate';
 import { supabase } from '../../lib/supabase';
+import { crmApi } from '../../lib/crm-api';
 import type {
   ChecklistSectionKey,
   PhotoPhase,
@@ -26,6 +27,27 @@ export default function ProductionJob() {
   const [blockOpen, setBlockOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [photosByPhase, setPhotosByPhase] = useState<Record<string, boolean>>({});
+  const [contactCard, setContactCard] = useState<{ name: string; address: string }>({
+    name: '…',
+    address: '…',
+  });
+
+  useEffect(() => {
+    if (!job) return;
+    void crmApi
+      .getContact(job.contact_id)
+      .then((resp) => {
+        const c = (resp as { contact?: { firstName?: string; lastName?: string; address1?: string } }).contact ?? {};
+        setContactCard({
+          name: `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || '(no name)',
+          address: c.address1 || '(no address)',
+        });
+      })
+      .catch((err) => {
+        console.error('[ProductionJob] getContact failed:', err);
+        setContactCard({ name: '(name unavailable)', address: '(address unavailable)' });
+      });
+  }, [job]);
 
   useEffect(() => { if (job) void checkBlockNotification(); }, [job, checkBlockNotification]);
 
@@ -52,12 +74,9 @@ export default function ProductionJob() {
 
   if (loading || !job || !jobId) return <div className="p-6">Loading…</div>;
 
-  const customerName = '(name from GHL)';
-  const address = '(address from GHL)';
-
   return (
     <div className="min-h-screen bg-slate-50 pb-24">
-      <JobHeader job={job} spec={spec} customerName={customerName} address={address} />
+      <JobHeader job={job} spec={spec} customerName={contactCard.name} address={contactCard.address} />
 
       <button
         onClick={() => { setIssueSection(null); setIssueOpen(true); }}

@@ -61,9 +61,8 @@ export function useIssue() {
     if (severity === 'high') {
       await sendHighSeverityIssueSms({
         jobNumber: input.jobNumber,
-        customerName: '(see GHL)',
+        contactId: input.contact_id,
         issueType: input.type,
-        address: '(see GHL)',
         jobId: input.job_id,
       });
     }

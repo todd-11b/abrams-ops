@@ -398,7 +398,6 @@ These were identified during brainstorming but explicitly out of scope for V1:
 - Per-checklist-item issue linkage (V1 captures section only)
 - GHL stage mirror for `final_payment` (V1 leaves it as internal-only)
 - **Photo upload persistent queue (post-V1).** `usePhotoQueue` writes failed uploads to localStorage as JSON, which collapses `File` objects to `{}` and is non-replayable on reload. The 3-retry-in-session loop covers transient real-world failures and is the canonical mechanism per spec section 7. The persistent fallback is dead code by intent — IndexedDB-based queueing is V2 work. Decision confirmed 2026-05-21.
-- **SMS customer name + address placeholders (post-V1).** Block and high-severity issue SMS messages send `Job: {jobNumber} — (see GHL)` and `Address: (see GHL)` rather than fetching from the GHL contact. Todd has the job number and a direct link to `/production/job/{jobId}` in the SMS, which is sufficient to triage. Real-name hydration is V2. Decision confirmed 2026-05-21.
 
 ---
 

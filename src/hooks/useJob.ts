@@ -87,9 +87,8 @@ export function useJob(jobId: string | undefined) {
     if (!shouldFireBlockNotification(job.blocked_at, job.last_blocked_notification_at)) return;
     await sendBlockSms({
       jobNumber: job.job_number,
-      customerName: '(see GHL)',
+      contactId: job.contact_id,
       reason: job.blocked_reason ?? 'unspecified',
-      address: '(see GHL)',
       jobId: job.job_id,
     });
     await supabase
