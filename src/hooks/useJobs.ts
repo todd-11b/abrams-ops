@@ -14,6 +14,7 @@ export function useJobs() {
       .from('jobs')
       .select('*')
       .is('archived_at', null)
+      .eq('deposit_status', 'paid')
       .order('install_date', { ascending: true, nullsFirst: false });
     if (error) {
       setError(error.message);
