@@ -650,6 +650,7 @@ export const ConsultApp = () => {
       <SignPayView
         form={form}
         onBack={() => setStep("proposal")}
+        proposalId={form.proposalId}
       />
     );
   }

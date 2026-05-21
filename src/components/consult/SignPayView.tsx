@@ -1,138 +1,92 @@
 import { useState, useRef } from "react";
 import { ArrowLeft, Loader2, CheckCircle } from "lucide-react";
 import SignatureCanvas from "react-signature-canvas";
-import { loadStripe } from "@stripe/stripe-js";
-import { Elements, CardElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import { ConsultFormData, calcTotals } from "./consultTypes";
-
-// Reads VITE_STRIPE_PUBLISHABLE_KEY from env. Falls back to the well-known
-// Stripe sample test key (public, not a secret) so dev still renders without setup.
-const stripePromise = loadStripe(
-  import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || "pk_test_TYooMQauvdEDq54NiTphI7jx"
-);
 
 interface Props {
   form: ConsultFormData;
   onBack: () => void;
+  proposalId: string;
 }
 
 function cur(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-const API_BASE = "https://backend.leadconnectorhq.com";
-
-const PaymentForm = ({ form, totals, onBack }: { form: ConsultFormData, totals: any, onBack: () => void }) => {
-  const stripe = useStripe();
-  const elements = useElements();
+export const SignPayView = ({ form, onBack, proposalId }: Props) => {
+  const totals = calcTotals(form);
   const sigPad = useRef<SignatureCanvas>(null);
-
   const [processing, setProcessing] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handlePayAndSign = async () => {
-    if (!stripe || !elements) return;
-
+  const handleSign = async () => {
     if (sigPad.current?.isEmpty()) {
       setError("Please provide a signature before proceeding.");
       return;
     }
-
     setProcessing(true);
     setError(null);
 
     try {
-      // Simulate Stripe processing delay
-      await new Promise(res => setTimeout(res, 1500));
+      const totalLf = form.fenceLines.reduce((sum, l) => sum + (l.linearFeet || 0), 0);
+      const resp = await fetch('/api/proposal/create-job', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contact_id: form.contactId,
+          proposal_opportunity_id: form.opportunityId || null,
+          proposal_display_id: proposalId,
+          deposit_due: totals.deposit,
+          fence_spec: {
+            fence_lines: form.fenceLines,
+            gates: form.gateInstances,
+            addons: [
+              ...(form.addOns.demo.enabled ? [{ type: 'demo', ...form.addOns.demo }] : []),
+              ...(form.addOns.stain.enabled ? [{ type: 'stain', ...form.addOns.stain }] : []),
+              ...(form.addOns.poolLatch.enabled ? [{ type: 'poolLatch', ...form.addOns.poolLatch }] : []),
+            ],
+            total_sections: totals.totalSections,
+            total_lf: totalLf,
+            proposal_total: totals.grandTotal,
+          },
+        }),
+      });
 
-      // In a real app, you would:
-      // 1. Create a PaymentIntent on your backend
-      // 2. Confirm the payment with stripe.confirmCardPayment
-      // 3. Upload the signature image to the CRM
-
-      if (form.opportunityId) {
-        await fetch(`${API_BASE}/opportunities/${form.opportunityId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", Version: "2021-07-28" },
-          body: JSON.stringify({ status: "won" }), // Mark as won in Sales pipeline
-        }).catch(() => {});
-      }
-
-      if (form.contactId) {
-        const noteBody = [
-          `[AUTO] Deposit Paid & Contract Signed`,
-          `Proposal ${form.proposalId}`,
-          `Total: ${cur(totals.grandTotal)}`,
-          `Deposit Processed: ${cur(totals.deposit)}`,
-          `ACTION REQUIRED: Move to Production Pipeline`,
-        ].join("\n");
-        await fetch(`${API_BASE}/contacts/${form.contactId}/notes`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Version: "2021-07-28" },
-          body: JSON.stringify({ body: noteBody }),
-        }).catch(() => {});
-      }
-
-      // Fire-and-forget: create a job record after deposit clears
-      try {
-        const totalLf = form.fenceLines.reduce((sum, l) => sum + (l.linearFeet || 0), 0);
-        const resp = await fetch('/api/proposal/create-job', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contact_id: form.contactId,
-            proposal_opportunity_id: form.opportunityId || null,
-            fence_spec: {
-              fence_lines: form.fenceLines,
-              gates: form.gateInstances,
-              addons: [
-                ...(form.addOns.demo.enabled ? [{ type: 'demo', ...form.addOns.demo }] : []),
-                ...(form.addOns.stain.enabled ? [{ type: 'stain', ...form.addOns.stain }] : []),
-                ...(form.addOns.poolLatch.enabled ? [{ type: 'poolLatch', ...form.addOns.poolLatch }] : []),
-              ],
-              total_sections: totals.totalSections,
-              total_lf: totalLf,
-              proposal_total: totals.grandTotal,
-            },
-          }),
-        });
-        if (!resp.ok) {
-          const t = await resp.text().catch(() => '');
-          console.error('[SignPayView] create-job failed:', resp.status, t);
-        } else {
-          const created = await resp.json();
-          console.log('[SignPayView] job created:', created.job_number);
-        }
-      } catch (err) {
-        console.error('[SignPayView] create-job network failure:', err);
+      if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        console.error('[SignPayView] create-job failed:', resp.status, t);
+        setError("We couldn't record your signature. Please try again or call us.");
+        return;
       }
 
       setSuccess(true);
-    } catch {
-      setError("Payment processing failed. Please try again.");
+    } catch (err) {
+      console.error('[SignPayView] create-job network failure:', err);
+      setError("Network error. Please try again.");
     } finally {
       setProcessing(false);
     }
   };
 
   if (success) {
+    const first = form.contactName ? form.contactName.split(" ")[0] : "there";
     return (
       <div className="min-h-screen flex flex-col items-center justify-center px-6" style={{ background: "#f4f6f9" }}>
         <div style={{ textAlign: "center", maxWidth: 400, width: "100%" }}>
           <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#e0f2eb", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 20px" }}>
             <CheckCircle size={36} color="#1d9e75" />
           </div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: "#0a1f3d", margin: "0 0 12px" }}>Payment Successful!</h2>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: "#0a1f3d", margin: "0 0 12px" }}>Proposal Signed!</h2>
           <p style={{ fontSize: 15, color: "#5f6a7d", lineHeight: 1.6, margin: "0 0 24px" }}>
-            Thank you, {form.contactName ? form.contactName.split(" ")[0] : "there"}! Your deposit has been processed and your project is now moving to production.
+            Thanks, {first}! You'll receive your deposit invoice shortly via text and email. Your project moves to production as soon as the deposit clears.
           </p>
           <div style={{ background: "white", borderRadius: 12, padding: "16px 20px", border: "1px solid #e5e9ef", marginBottom: 24 }}>
             {([
-              ["Proposal", form.proposalId],
-              ["Total investment", cur(totals.grandTotal)],
-              ["Deposit Paid", cur(totals.deposit)],
-              ["Balance Remaining", cur(totals.balance)],
+              ["Proposal", proposalId],
+              ["Total Investment", cur(totals.grandTotal)],
+              ["Deposit Due", cur(totals.deposit)],
+              ["Balance on Finish", cur(totals.balance)],
             ] as [string, string][]).map(([label, val]) => (
               <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
                 <span style={{ fontSize: 13, color: "#5f6a7d" }}>{label}</span>
@@ -158,8 +112,8 @@ const PaymentForm = ({ form, totals, onBack }: { form: ConsultFormData, totals: 
           <ArrowLeft size={18} />
         </button>
         <div>
-          <p style={{ color: "white", fontWeight: 700, fontSize: 15, margin: 0 }}>Sign & Pay</p>
-          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, margin: 0 }}>{form.proposalId}</p>
+          <p style={{ color: "white", fontWeight: 700, fontSize: 15, margin: 0 }}>Sign Proposal</p>
+          <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, margin: 0 }}>{proposalId}</p>
         </div>
       </div>
 
@@ -169,7 +123,7 @@ const PaymentForm = ({ form, totals, onBack }: { form: ConsultFormData, totals: 
             Finalize your project
           </h1>
           <p style={{ fontSize: 14, color: "#5f6a7d", margin: 0 }}>
-            Review your investment, sign the agreement, and process your deposit.
+            Review your investment, then sign to lock it in. Your deposit invoice will follow.
           </p>
         </div>
 
@@ -211,61 +165,31 @@ const PaymentForm = ({ form, totals, onBack }: { form: ConsultFormData, totals: 
           </div>
         </div>
 
-        {/* Stripe */}
-        <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e9ef", padding: "20px" }}>
-          <p style={{ fontSize: 12, fontWeight: 700, color: "#5f6a7d", margin: "0 0 16px", letterSpacing: "0.08em", textTransform: "uppercase" }}>Deposit Payment</p>
-          <div style={{ padding: "16px", borderRadius: 10, background: "#f8faff", border: "1px solid #e5e9ef" }}>
-            <CardElement
-              options={{
-                style: {
-                  base: {
-                    fontSize: '16px',
-                    color: '#0a1f3d',
-                    '::placeholder': { color: '#aab7c4' },
-                  },
-                  invalid: { color: '#ef4444' },
-                },
-              }}
-            />
-          </div>
-        </div>
-
         {error && (
           <div style={{ background: "#fef2f2", color: "#ef4444", padding: "12px", borderRadius: 8, fontSize: 13, fontWeight: 500, textAlign: "center" }}>
             {error}
           </div>
         )}
 
-        {/* Action CTA */}
         <button
-          onClick={handlePayAndSign}
-          disabled={processing || !stripe}
+          onClick={handleSign}
+          disabled={processing}
           style={{
             width: "100%", background: "#1d9e75", color: "white", border: "none", borderRadius: 14,
             padding: "20px 16px", fontSize: 15, fontWeight: 800, cursor: processing ? "default" : "pointer",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 4, opacity: processing || !stripe ? 0.7 : 1,
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 4, opacity: processing ? 0.7 : 1,
             marginTop: 8
           }}
         >
           {processing
             ? <Loader2 size={20} className="animate-spin" />
             : <>
-                <span>Sign & Pay Deposit ({cur(totals.deposit)})</span>
-                <span style={{ fontSize: 12, fontWeight: 500, opacity: 0.85 }}>Secure SSL Encrypted Transaction</span>
+                <span>Sign Proposal</span>
+                <span style={{ fontSize: 12, fontWeight: 500, opacity: 0.85 }}>Your deposit invoice will follow</span>
               </>
           }
         </button>
       </div>
     </div>
-  );
-};
-
-export const SignPayView = ({ form, onBack }: Props) => {
-  const totals = calcTotals(form);
-
-  return (
-    <Elements stripe={stripePromise}>
-      <PaymentForm form={form} totals={totals} onBack={onBack} />
-    </Elements>
   );
 };
