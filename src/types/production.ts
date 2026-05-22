@@ -47,6 +47,8 @@ export interface Job {
   deposit_status: DepositStatus;
   deposit_paid_at: string | null;
   signed_at: string | null;
+  final_payment_status: 'unpaid' | 'paid' | 'pending_invoice';
+  final_payment_paid_at: string | null;
   blocked_reason: string | null;
   blocked_note: string | null;
   blocked_at: string | null;

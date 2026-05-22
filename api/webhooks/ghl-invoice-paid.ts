@@ -1,14 +1,17 @@
 // api/webhooks/ghl-invoice-paid.ts
-// Vercel edge function — receives GHL invoice.paid events and flips the
-// matching job from deposit_status='pending_invoice' to 'paid'. Job lookup
-// keys off the GHL opportunityId in the payload, matched against jobs.proposal_id.
+// Vercel edge function — receives GHL invoice.paid events and routes them
+// to one of two job-payment columns based on the body's paymentType field.
+//
+//   paymentType missing or 'deposit'  → flips deposit_status to 'paid',
+//                                       moves opp to Job Created stage.
+//   paymentType 'final_balance'       → flips final_payment_status to 'paid',
+//                                       moves opp to Job Complete stage.
+//
+// Job lookup keys off the GHL opportunityId in the payload, matched against
+// jobs.proposal_id. Idempotent on the relevant *_status='paid' state.
 //
 // Auth: required X-Abrams-Webhook-Secret header, constant-time compared
 // against GHL_WEBHOOK_SECRET. Mismatch -> 401 + SMS to Todd, no DB writes.
-//
-// Idempotency: before any side effect, the handler reads the job. If
-// deposit_status is already 'paid', returns 200 {already_processed:true}
-// and exits without any writes, GHL calls, or SMS.
 
 export const config = { runtime: 'edge' };
 
@@ -72,12 +75,22 @@ async function sendToddSms(ghlApiKey: string, toddContactId: string, message: st
   }
 }
 
+type PaymentType = 'deposit' | 'final_balance';
+
 interface InvoicePaidPayload {
   contactId?: string;
   opportunityId?: string;
   invoiceId?: string;
   amountPaid?: number;
   paidAt?: string;
+  paymentType?: string;
+}
+
+interface JobRow {
+  job_id: string;
+  job_number: string;
+  deposit_status: string;
+  final_payment_status: string;
 }
 
 export default async function handler(req: Request) {
@@ -87,6 +100,7 @@ export default async function handler(req: Request) {
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
   const GHL_API_KEY = process.env.GHL_API_KEY ?? '';
   const GHL_STAGE_JOB_CREATED = process.env.GHL_STAGE_JOB_CREATED ?? '';
+  const GHL_STAGE_JOB_COMPLETE = process.env.GHL_STAGE_JOB_COMPLETE ?? '';
   const GHL_WEBHOOK_SECRET = process.env.GHL_WEBHOOK_SECRET ?? '';
   const GHL_TODD_CONTACT_ID = process.env.GHL_TODD_CONTACT_ID ?? '';
   const GHL_OUTBOUND_IP_PREFIXES = (process.env.GHL_OUTBOUND_IP_PREFIXES ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -123,19 +137,28 @@ export default async function handler(req: Request) {
   const { contactId, opportunityId, invoiceId, amountPaid, paidAt } = body;
   if (!opportunityId) return json({ error: 'opportunityId required' }, { status: 400 });
 
-  // --- Lookup job by proposal_id ---
-  const lookupRes = await sb(sbCtx, `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&select=job_id,job_number,deposit_status`, {
-    method: 'GET',
-  });
+  // Determine paymentType (default 'deposit' for backwards-compat).
+  const rawType = body.paymentType ?? 'deposit';
+  if (rawType !== 'deposit' && rawType !== 'final_balance') {
+    return json({ error: `unknown paymentType: ${rawType}` }, { status: 400 });
+  }
+  const paymentType = rawType as PaymentType;
+
+  // --- Lookup job by proposal_id (both paths need both *_status fields) ---
+  const lookupRes = await sb(
+    sbCtx,
+    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&select=job_id,job_number,deposit_status,final_payment_status`,
+    { method: 'GET' }
+  );
   if (!lookupRes.ok) {
     const t = await lookupRes.text().catch(() => '');
     console.error('[ghl-invoice-paid] job lookup failed', t);
     return json({ error: 'job lookup failed' }, { status: 502 });
   }
-  const rows = (await lookupRes.json()) as { job_id: string; job_number: string; deposit_status: string }[];
+  const rows = (await lookupRes.json()) as JobRow[];
 
   if (rows.length === 0) {
-    console.warn('[ghl-invoice-paid] no matching job', { opportunityId, contactId, invoiceId });
+    console.warn('[ghl-invoice-paid] no matching job', { opportunityId, contactId, invoiceId, paymentType });
     await sendToddSms(
       GHL_API_KEY,
       GHL_TODD_CONTACT_ID,
@@ -143,20 +166,39 @@ export default async function handler(req: Request) {
       `Contact ID: ${contactId ?? '(missing)'}\n` +
       `Invoice ID: ${invoiceId ?? '(missing)'}\n` +
       `Opportunity ID: ${opportunityId}\n` +
+      `Payment type: ${paymentType}\n` +
       'Check Supabase — manual intervention required.'
     );
     return json({ error: 'no matching job', opportunityId }, { status: 422 });
   }
 
   const job = rows[0];
+  const nowIso = new Date().toISOString();
 
-  // --- Idempotency guard (before any side effect) ---
+  if (paymentType === 'deposit') {
+    return handleDeposit(req, sbCtx, job, body, nowIso, opportunityId, contactId,
+      { GHL_API_KEY, GHL_STAGE_JOB_CREATED });
+  }
+  return handleFinalBalance(req, sbCtx, job, body, nowIso, opportunityId, contactId,
+    { GHL_API_KEY, GHL_STAGE_JOB_COMPLETE });
+}
+
+async function handleDeposit(
+  _req: Request,
+  sbCtx: SbCtx,
+  job: JobRow,
+  body: InvoicePaidPayload,
+  nowIso: string,
+  opportunityId: string,
+  contactId: string | undefined,
+  env: { GHL_API_KEY: string; GHL_STAGE_JOB_CREATED: string },
+): Promise<Response> {
+  // Idempotency
   if (job.deposit_status === 'paid') {
     return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
   }
 
-  // --- UPDATE: flip state. Status guard in WHERE protects against races. ---
-  const nowIso = new Date().toISOString();
+  // UPDATE
   const updateRes = await sb(
     sbCtx,
     `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&deposit_status=eq.pending_invoice`,
@@ -164,24 +206,21 @@ export default async function handler(req: Request) {
       method: 'PATCH',
       body: JSON.stringify({
         deposit_status: 'paid',
-        deposit_paid_at: paidAt || nowIso,
+        deposit_paid_at: body.paidAt || nowIso,
       }),
     }
   );
   if (!updateRes.ok) {
     const t = await updateRes.text().catch(() => '');
-    console.error('[ghl-invoice-paid] UPDATE failed', t);
+    console.error('[ghl-invoice-paid] deposit UPDATE failed', t);
     return json({ error: 'update failed', detail: t }, { status: 502 });
   }
-  const updated = (await updateRes.json()) as { job_id: string; job_number: string; deposit_status: string }[];
+  const updated = (await updateRes.json()) as JobRow[];
   if (updated.length === 0) {
-    // Race: another concurrent webhook fired and won. Treat as already-processed.
     return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
   }
 
-  // --- Activity log ---
-  // source must be one of ('manual', 'workflow', 'system') per the
-  // jobs_activity_log_source_check constraint. Treat the GHL webhook as a workflow trigger.
+  // Activity log
   const activityRes = await sb(sbCtx, 'job_activity_log', {
     method: 'POST',
     body: JSON.stringify({
@@ -190,40 +229,125 @@ export default async function handler(req: Request) {
       type: 'deposit_paid_via_invoice',
       actor: 'system',
       source: 'workflow',
-      payload: { invoice_id: invoiceId ?? null, amount_paid: amountPaid ?? null, opportunity_id: opportunityId },
+      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, opportunity_id: opportunityId },
     }),
   });
   if (!activityRes.ok) {
     const t = await activityRes.text().catch(() => '');
-    console.error('[ghl-invoice-paid] activity log insert failed', t);
+    console.error('[ghl-invoice-paid] deposit activity log insert failed', t);
   }
 
-  // --- GHL stage move (fail-soft) ---
-  if (GHL_API_KEY && GHL_STAGE_JOB_CREATED) {
+  // GHL stage move (fail-soft)
+  if (env.GHL_API_KEY && env.GHL_STAGE_JOB_CREATED) {
     try {
       await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
         method: 'PUT',
-        headers: ghlHeaders(GHL_API_KEY),
-        body: JSON.stringify({ pipelineStageId: GHL_STAGE_JOB_CREATED }),
+        headers: ghlHeaders(env.GHL_API_KEY),
+        body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_CREATED }),
       });
     } catch (err) {
-      console.error('[ghl-invoice-paid] GHL stage move failed:', err);
+      console.error('[ghl-invoice-paid] GHL Job Created stage move failed:', err);
     }
   }
 
-  // --- Paid note (fail-soft) ---
-  if (GHL_API_KEY && contactId) {
+  // Paid note (fail-soft)
+  if (env.GHL_API_KEY && contactId) {
     try {
       const note = `[AUTO] Deposit received — job ${job.job_number} moving to production`;
       await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
         method: 'POST',
-        headers: ghlHeaders(GHL_API_KEY),
+        headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ body: note }),
       });
     } catch (err) {
-      console.error('[ghl-invoice-paid] paid note failed:', err);
+      console.error('[ghl-invoice-paid] deposit paid note failed:', err);
     }
   }
 
   return json({ job_id: job.job_id, job_number: job.job_number, status: 'paid' }, { status: 201 });
+}
+
+async function handleFinalBalance(
+  _req: Request,
+  sbCtx: SbCtx,
+  job: JobRow,
+  body: InvoicePaidPayload,
+  nowIso: string,
+  opportunityId: string,
+  contactId: string | undefined,
+  env: { GHL_API_KEY: string; GHL_STAGE_JOB_COMPLETE: string },
+): Promise<Response> {
+  // Idempotency
+  if (job.final_payment_status === 'paid') {
+    return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
+  }
+
+  // UPDATE: only flip when current status is NOT already paid. We accept any
+  // non-paid state ('unpaid' or 'pending_invoice') as the WHERE-clause guard.
+  const updateRes = await sb(
+    sbCtx,
+    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&final_payment_status=eq.unpaid`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({
+        final_payment_status: 'paid',
+        final_payment_paid_at: body.paidAt || nowIso,
+      }),
+    }
+  );
+  if (!updateRes.ok) {
+    const t = await updateRes.text().catch(() => '');
+    console.error('[ghl-invoice-paid] final UPDATE failed', t);
+    return json({ error: 'update failed', detail: t }, { status: 502 });
+  }
+  const updated = (await updateRes.json()) as JobRow[];
+  if (updated.length === 0) {
+    return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
+  }
+
+  // Activity log
+  const activityRes = await sb(sbCtx, 'job_activity_log', {
+    method: 'POST',
+    body: JSON.stringify({
+      job_id: job.job_id,
+      contact_id: contactId ?? null,
+      type: 'final_payment_via_invoice',
+      actor: 'system',
+      source: 'workflow',
+      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, opportunity_id: opportunityId },
+    }),
+  });
+  if (!activityRes.ok) {
+    const t = await activityRes.text().catch(() => '');
+    console.error('[ghl-invoice-paid] final activity log insert failed', t);
+  }
+
+  // GHL stage move to Job Complete (fail-soft)
+  if (env.GHL_API_KEY && env.GHL_STAGE_JOB_COMPLETE) {
+    try {
+      await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+        method: 'PUT',
+        headers: ghlHeaders(env.GHL_API_KEY),
+        body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_COMPLETE }),
+      });
+    } catch (err) {
+      console.error('[ghl-invoice-paid] GHL Job Complete stage move failed:', err);
+    }
+  }
+
+  // Paid note (fail-soft)
+  if (env.GHL_API_KEY && contactId) {
+    try {
+      const note = `[AUTO] Final payment received — job ${job.job_number} complete`;
+      await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
+        method: 'POST',
+        headers: ghlHeaders(env.GHL_API_KEY),
+        body: JSON.stringify({ body: note }),
+      });
+    } catch (err) {
+      console.error('[ghl-invoice-paid] final paid note failed:', err);
+    }
+  }
+
+  return json({ job_id: job.job_id, job_number: job.job_number, status: 'final_paid' }, { status: 201 });
 }
