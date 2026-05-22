@@ -180,17 +180,23 @@ export default async function handler(req: Request) {
   }
 
   // --- Activity log ---
-  await sb(sbCtx, 'job_activity_log', {
+  // source must be one of ('manual', 'workflow', 'system') per the
+  // jobs_activity_log_source_check constraint. Treat the GHL webhook as a workflow trigger.
+  const activityRes = await sb(sbCtx, 'job_activity_log', {
     method: 'POST',
     body: JSON.stringify({
       job_id: job.job_id,
       contact_id: contactId ?? null,
       type: 'deposit_paid_via_invoice',
       actor: 'system',
-      source: 'ghl_webhook',
+      source: 'workflow',
       payload: { invoice_id: invoiceId ?? null, amount_paid: amountPaid ?? null, opportunity_id: opportunityId },
     }),
   });
+  if (!activityRes.ok) {
+    const t = await activityRes.text().catch(() => '');
+    console.error('[ghl-invoice-paid] activity log insert failed', t);
+  }
 
   // --- GHL stage move (fail-soft) ---
   if (GHL_API_KEY && GHL_STAGE_JOB_CREATED) {

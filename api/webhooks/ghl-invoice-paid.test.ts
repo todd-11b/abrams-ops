@@ -77,6 +77,7 @@ describe('ghl-invoice-paid webhook', () => {
     expect(activity).toBeDefined();
     const activityBody = JSON.parse(activity!.init.body as string);
     expect(activityBody.type).toBe('deposit_paid_via_invoice');
+    expect(activityBody.source).toBe('workflow');
     expect(activityBody.payload).toMatchObject({ invoice_id: 'inv-1', amount_paid: 5000 });
 
     const stageMove = calls.find(c =>
