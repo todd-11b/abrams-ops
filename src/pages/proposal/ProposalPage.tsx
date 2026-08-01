@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { ProposalView } from '../../components/consult/ProposalView';
+import { SignPayView } from '../../components/consult/SignPayView';
 import { calcTotals, ConsultFormData } from '../../components/consult/consultTypes';
 
 type LoadState =
@@ -9,18 +10,19 @@ type LoadState =
   | { status: 'ready'; form: ConsultFormData };
 
 export default function ProposalPage() {
-  const { contactId } = useParams<{ contactId: string }>();
+  const { token } = useParams<{ token: string }>();
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [signing, setSigning] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
-      if (!contactId) {
-        setState({ status: 'error', message: 'Missing contact ID in URL.' });
+      if (!token) {
+        setState({ status: 'error', message: 'Missing proposal token in URL.' });
         return;
       }
       try {
-        const res = await fetch(`/api/proposal/${encodeURIComponent(contactId)}`, {
+        const res = await fetch(`/api/proposal/${encodeURIComponent(token)}`, {
           headers: { Accept: 'application/json' },
         });
         if (!res.ok) {
@@ -47,7 +49,7 @@ export default function ProposalPage() {
     return () => {
       cancelled = true;
     };
-  }, [contactId]);
+  }, [token]);
 
   if (state.status === 'loading') {
     return (
@@ -70,6 +72,10 @@ export default function ProposalPage() {
 
   const totals = calcTotals(state.form);
 
+  if (signing && token) {
+    return <SignPayView form={state.form} proposalId={state.form.proposalId} proposalToken={token} onBack={() => setSigning(false)} />;
+  }
+
   return (
     <ProposalView
       form={state.form}
@@ -77,9 +83,7 @@ export default function ProposalPage() {
       onBack={() => {
         /* customer-facing — no back action */
       }}
-      onPresent={() => {
-        /* customer-facing — no present action */
-      }}
+      onPresent={() => setSigning(true)}
       onSendForReview={() => {
         /* customer-facing — no send action */
       }}

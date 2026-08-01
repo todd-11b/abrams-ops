@@ -20,6 +20,7 @@ import { ProposalView } from "./ProposalView";
 import { SignPayView } from "./SignPayView";
 // @ts-ignore
 import { crmApi } from "../../lib/crm-api";
+import { operatorFetch } from "../../utils/actor";
 import {
   ConsultFormData,
   FENCE_STYLES,
@@ -117,6 +118,22 @@ export const ConsultApp = () => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<any[]>([]);
+  const [proposalToken, setProposalToken] = useState('');
+
+  const issueProposalToken = async (): Promise<string> => {
+    if (proposalToken) return proposalToken;
+    if (!form.contactId || form.contactId.startsWith('local_') || !form.opportunityId) {
+      throw new Error('Save the CRM contact and opportunity before presenting the proposal.');
+    }
+    const response = await operatorFetch('/api/operator/proposals', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contact_id: form.contactId, proposal_id: form.opportunityId }),
+    });
+    if (!response.ok) throw new Error('Could not issue a protected proposal link.');
+    const body = await response.json() as { token: string };
+    setProposalToken(body.token);
+    return body.token;
+  };
 
   useEffect(() => {
     const draftsObj = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
@@ -411,8 +428,9 @@ export const ConsultApp = () => {
         throw new Error("Please save the contact to the CRM before sending a proposal.");
       }
 
-      // Build proposal link using the existing route format
-      const proposalLink = `${window.location.origin}/proposal/${form.contactId}`;
+      if (!form.opportunityId) throw new Error("A CRM opportunity is required before issuing a proposal link.");
+      const token = await issueProposalToken();
+      const proposalLink = `${window.location.origin}/proposal/${token}`;
 
       const updatedForm: ConsultFormData = {
         ...form,
@@ -635,7 +653,7 @@ export const ConsultApp = () => {
         form={form}
         totals={calcTotals(form)}
         onBack={() => setStep("consult")}
-        onPresent={() => setStep("signpay")}
+        onPresent={async () => { try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
         onSendForReview={() => handleSendForReview(false)}
         onRegenerateInvoice={() => handleSendForReview(true)}
         onSendToCustomer={handleSendToCustomer}
@@ -651,6 +669,7 @@ export const ConsultApp = () => {
         form={form}
         onBack={() => setStep("proposal")}
         proposalId={form.proposalId}
+        proposalToken={proposalToken}
       />
     );
   }

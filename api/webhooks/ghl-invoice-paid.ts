@@ -1,4 +1,6 @@
 // api/webhooks/ghl-invoice-paid.ts
+// Version: 1.1 | Updated: 2026-08-01
+// Changelog: accept pending final invoices, verify zero-row races, and log GHL non-2xx responses.
 // Vercel edge function — receives GHL invoice.paid events and routes them
 // to one of two job-payment columns based on the body's paymentType field.
 //
@@ -57,6 +59,12 @@ function ghlHeaders(apiKey: string) {
     'Content-Type': 'application/json',
     Version: GHL_VERSION,
   };
+}
+
+async function logGhlNonOk(label: string, response: Response): Promise<void> {
+  if (response.ok) return;
+  const detail = await response.text().catch(() => '');
+  console.error(`[ghl-invoice-paid] ${label} returned ${response.status}`, detail);
 }
 
 async function sendToddSms(ghlApiKey: string, toddContactId: string, message: string): Promise<void> {
@@ -134,7 +142,7 @@ export default async function handler(req: Request) {
   try { body = await req.json(); }
   catch { return json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  const { contactId, opportunityId, invoiceId, amountPaid, paidAt } = body;
+  const { contactId, opportunityId, invoiceId } = body;
   if (!opportunityId) return json({ error: 'opportunityId required' }, { status: 400 });
 
   // Determine paymentType (default 'deposit' for backwards-compat).
@@ -240,11 +248,12 @@ async function handleDeposit(
   // GHL stage move (fail-soft)
   if (env.GHL_API_KEY && env.GHL_STAGE_JOB_CREATED) {
     try {
-      await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+      const response = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
         method: 'PUT',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_CREATED }),
       });
+      await logGhlNonOk('GHL Job Created stage move', response);
     } catch (err) {
       console.error('[ghl-invoice-paid] GHL Job Created stage move failed:', err);
     }
@@ -254,11 +263,12 @@ async function handleDeposit(
   if (env.GHL_API_KEY && contactId) {
     try {
       const note = `[AUTO] Deposit received — job ${job.job_number} moving to production`;
-      await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
+      const response = await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
         method: 'POST',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ body: note }),
       });
+      await logGhlNonOk('deposit paid note', response);
     } catch (err) {
       console.error('[ghl-invoice-paid] deposit paid note failed:', err);
     }
@@ -282,11 +292,11 @@ async function handleFinalBalance(
     return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
   }
 
-  // UPDATE: only flip when current status is NOT already paid. We accept any
-  // non-paid state ('unpaid' or 'pending_invoice') as the WHERE-clause guard.
+  // UPDATE: accept both schema-valid non-paid states. The status guard makes
+  // concurrent deliveries race safely without overwriting a paid timestamp.
   const updateRes = await sb(
     sbCtx,
-    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&final_payment_status=eq.unpaid`,
+    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&final_payment_status=in.(unpaid,pending_invoice)`,
     {
       method: 'PATCH',
       body: JSON.stringify({
@@ -302,7 +312,27 @@ async function handleFinalBalance(
   }
   const updated = (await updateRes.json()) as JobRow[];
   if (updated.length === 0) {
-    return json({ already_processed: true, job_id: job.job_id, job_number: job.job_number }, { status: 200 });
+    // A zero-row guarded PATCH is only idempotent if a concurrent request
+    // actually moved the row to paid. Re-read before making that claim.
+    const raceLookup = await sb(
+      sbCtx,
+      `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&select=job_id,job_number,deposit_status,final_payment_status`,
+      { method: 'GET' },
+    );
+    if (!raceLookup.ok) {
+      const detail = await raceLookup.text().catch(() => '');
+      console.error('[ghl-invoice-paid] final race lookup failed', detail);
+      return json({ error: 'final payment state could not be confirmed' }, { status: 502 });
+    }
+    const [current] = (await raceLookup.json()) as JobRow[];
+    if (current?.final_payment_status === 'paid') {
+      return json({ already_processed: true, job_id: current.job_id, job_number: current.job_number }, { status: 200 });
+    }
+    console.error('[ghl-invoice-paid] final UPDATE changed no rows and payment is not paid', {
+      opportunityId,
+      finalPaymentStatus: current?.final_payment_status ?? 'missing',
+    });
+    return json({ error: 'final payment state conflict' }, { status: 409 });
   }
 
   // Activity log
@@ -325,11 +355,12 @@ async function handleFinalBalance(
   // GHL stage move to Job Complete (fail-soft)
   if (env.GHL_API_KEY && env.GHL_STAGE_JOB_COMPLETE) {
     try {
-      await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+      const response = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
         method: 'PUT',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_COMPLETE }),
       });
+      await logGhlNonOk('GHL Job Complete stage move', response);
     } catch (err) {
       console.error('[ghl-invoice-paid] GHL Job Complete stage move failed:', err);
     }
@@ -339,11 +370,12 @@ async function handleFinalBalance(
   if (env.GHL_API_KEY && contactId) {
     try {
       const note = `[AUTO] Final payment received — job ${job.job_number} complete`;
-      await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
+      const response = await fetch(`${GHL_BASE}/contacts/${contactId}/notes`, {
         method: 'POST',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ body: note }),
       });
+      await logGhlNonOk('final paid note', response);
     } catch (err) {
       console.error('[ghl-invoice-paid] final paid note failed:', err);
     }

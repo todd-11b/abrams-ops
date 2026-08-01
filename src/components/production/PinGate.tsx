@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { resolveActorFromPin, storeActor } from '../../utils/actor';
+import { signInWithPin } from '../../utils/actor';
 import type { Actor } from '../../types/production';
 
 interface Props {
@@ -11,12 +11,11 @@ export function ProductionPinGate({ onUnlock }: Props) {
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
 
-  const submit = (next: string) => {
-    const actor = resolveActorFromPin(next);
-    if (actor) {
-      storeActor(actor);
+  const submit = async (next: string) => {
+    try {
+      const actor = await signInWithPin(next);
       onUnlock(actor);
-    } else {
+    } catch {
       setShake(true);
       setError(true);
       setTimeout(() => { setPin(''); setShake(false); }, 600);
@@ -28,7 +27,7 @@ export function ProductionPinGate({ onUnlock }: Props) {
     const next = pin + d;
     setPin(next);
     setError(false);
-    if (next.length === 4) submit(next);
+    if (next.length === 4) void submit(next);
   };
 
   const handleDelete = () => { setPin((p) => p.slice(0, -1)); setError(false); };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, Outlet } from 'react-router-dom';
 import ConsultPage from './pages/consult/ConsultPage';
 import ProposalPage from './pages/proposal/ProposalPage';
@@ -8,8 +8,7 @@ import { ProductionPinGate } from './components/production/PinGate';
 import { getStoredActor } from './utils/actor';
 
 function ProductionShell() {
-  const [unlocked, setUnlocked] = useState(false);
-  useEffect(() => { if (getStoredActor()) setUnlocked(true); }, []);
+  const [unlocked, setUnlocked] = useState(() => Boolean(getStoredActor()));
   if (!unlocked) return <ProductionPinGate onUnlock={() => setUnlocked(true)} />;
   return <Outlet />;
 }
@@ -33,7 +32,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/consult" element={<ConsultPage />} />
-        <Route path="/proposal/:contactId" element={<ProposalPage />} />
+        <Route path="/proposal/:token" element={<ProposalPage />} />
         <Route element={<ProductionShell />}>
           <Route path="/production" element={<ProductionDashboard />} />
           <Route path="/production/job/:jobId" element={<ProductionJob />} />

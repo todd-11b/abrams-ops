@@ -1,9 +1,24 @@
 # Abrams Fence — `/production` Module Design
 
-**Status:** Approved design, ready for implementation plan
+**Status:** Approved; payment-flow portions partially superseded
 **Date:** 2026-05-21
+**Updated:** 2026-08-01
+**Version:** 1.3
 **Repo:** `abrams-ops`
 **Module:** Production (third module after `/consult` and `/proposal`)
+
+## Changelog
+
+- **1.3 — 2026-08-01:** Makes rotated credentials/server-only secrets a prerequisite to compatible-build activation and standardizes the five-step cutover/rollback order.
+- **1.2 — 2026-08-01:** Integrates the Task 8 payment contract with server-enforced operator/proposal containment; direct browser data/GHL access is historical and must not be restored.
+- **1.1 — 2026-08-01:** Marks the final-payment V1 deferral as superseded by the approved single-endpoint Task 8 contract in `2026-05-21-ghl-invoice-flow-design.md` v1.1.
+- **1.0 — 2026-05-21:** Original production-module design.
+
+> Contract precedence: the invoice-flow design v1.3 supersedes this document's
+> signature/deposit trigger and final-payment mirroring statements. Remaining
+> production-module rules stay in force.
+
+> Activation order: apply additive non-restrictive database prerequisites; obtain Todd's separate approval and configure rotated credentials/server-only secrets before the compatible build becomes active; activate the compatible server/API/UI; prove login, signing, webhook, and rollback readiness with non-customer fixtures; apply restrictive table/storage changes last. Additive prerequisites alone do not activate the boundary, and rollback never restores exposed credentials.
 
 ---
 
@@ -75,13 +90,12 @@ If step 1 fails, do not proceed. Do not create a GHL job-created event without a
 
 PIN gate reuses the `/consult` pattern but with **distinct PINs per user**, scoped to the `/production` module only:
 
-- Todd PIN: `1122`
-- Ty PIN: `8633`
+- Owner and field PINs are server-only environment values; current credentials must never appear in source or documentation.
 
 The existing `/consult` PIN is untouched — that's a separate gate for a separate system. PIN identity drives the `actor` field directly:
 
-- PIN `1122` matched → `actor = 'todd'`
-- PIN `8633` matched → `actor = 'ty'`
+- Server-authenticated owner credential → `actor = 'todd'`
+- Server-authenticated field credential → `actor = 'ty'`
 
 PIN is captured at gate entry and persisted to localStorage (`abrams_production_actor`) for the session. View toggle is independent of actor — Todd can open field view on his phone and his actions still log as `todd`.
 
@@ -374,7 +388,7 @@ All sync failures: log, queue for retry, do not roll back Supabase.
 14. `src/hooks/usePhotoQueue.ts` — Supabase Storage upload queue + GHL mirror + retry
 15. `src/hooks/useIssue.ts` — create/resolve issue, auto-rules from 3.6 and section 9
 16. `src/hooks/useNotifications.ts` — block-rate-limit logic + SMS dispatch
-17. `src/components/production/PinGate.tsx` — adapted from /consult, reuses PIN 8633
+17. `src/components/production/PinGate.tsx` — adapted from /consult; submits credentials to the server-backed operator session endpoint
 18. `src/components/production/ViewToggle.tsx` — office/field switcher, persists to localStorage
 19. `src/components/production/JobCard.tsx`
 20. `src/components/production/StatusBadge.tsx` + `StagePill.tsx`

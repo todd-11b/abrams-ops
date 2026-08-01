@@ -7,13 +7,14 @@ interface Props {
   form: ConsultFormData;
   onBack: () => void;
   proposalId: string;
+  proposalToken: string;
 }
 
 function cur(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
-export const SignPayView = ({ form, onBack, proposalId }: Props) => {
+export const SignPayView = ({ form, onBack, proposalId, proposalToken }: Props) => {
   const totals = calcTotals(form);
   const sigPad = useRef<SignatureCanvas>(null);
   const [processing, setProcessing] = useState(false);
@@ -34,8 +35,7 @@ export const SignPayView = ({ form, onBack, proposalId }: Props) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contact_id: form.contactId,
-          proposal_opportunity_id: form.opportunityId || null,
+          token: proposalToken,
           proposal_display_id: proposalId,
           deposit_due: totals.deposit,
           fence_spec: {

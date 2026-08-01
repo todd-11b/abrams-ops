@@ -58,13 +58,13 @@ describe('SignPayView (signature-only)', () => {
   });
 
   it('renders without any Stripe CardElement (no iframe)', () => {
-    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" />);
+    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" proposalToken={'a'.repeat(64)} />);
     expect(document.querySelectorAll('iframe').length).toBe(0);
     expect(screen.queryByText(/card number/i)).toBeNull();
   });
 
   it('shows the "Sign Proposal" CTA, not "Sign & Pay Deposit"', () => {
-    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" />);
+    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" proposalToken={'a'.repeat(64)} />);
     expect(screen.getByRole('button', { name: /sign proposal/i })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /sign & pay/i })).toBeNull();
   });
@@ -73,7 +73,8 @@ describe('SignPayView (signature-only)', () => {
     // Simulate a drawn signature
     mockIsEmpty = false;
 
-    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (...args: [RequestInfo | URL, RequestInit?]) => {
+      const [url] = args;
       const u = typeof url === 'string' ? url : url.toString();
       if (u.endsWith('/api/proposal/create-job')) {
         return new Response(JSON.stringify({ job_id: 'j1', job_number: 'AF-2026-0007' }), { status: 201 });
@@ -82,7 +83,7 @@ describe('SignPayView (signature-only)', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" />);
+    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" proposalToken={'a'.repeat(64)} />);
 
     fireEvent.click(screen.getByRole('button', { name: /sign proposal/i }));
 
@@ -92,6 +93,8 @@ describe('SignPayView (signature-only)', () => {
         expect.objectContaining({ method: 'POST' })
       );
     });
+    const request = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/proposal/create-job'))?.[1] as RequestInit | undefined;
+    expect(JSON.parse(String(request?.body))).toMatchObject({ token: 'a'.repeat(64) });
 
     await waitFor(() => {
       expect(screen.getByText(/proposal signed/i)).toBeTruthy();
@@ -101,7 +104,7 @@ describe('SignPayView (signature-only)', () => {
 
   it('blocks submission when signature pad is empty', () => {
     // mockIsEmpty is true (default)
-    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" />);
+    render(<SignPayView form={baseForm} onBack={() => {}} proposalId="P-1" proposalToken={'a'.repeat(64)} />);
     fireEvent.click(screen.getByRole('button', { name: /sign proposal/i }));
     expect(screen.getByText(/provide a signature/i)).toBeTruthy();
   });

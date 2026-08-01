@@ -1,5 +1,21 @@
 # `/production` Module Implementation Plan
 
+**Updated:** 2026-08-01
+**Version:** 1.3
+
+## Changelog
+
+- **1.3 — 2026-08-01:** Standardizes the five-step activation/rollback gate and requires rotated credentials/server-only secrets before the compatible build becomes active.
+- **1.2 — 2026-08-01:** Integrated Task 8 with server-enforced operator/proposal containment; its activation ordering is superseded by v1.3.
+- **1.1 — 2026-08-01:** Declares invoice-flow v1.1 precedence for signature, deposit, and final-balance routing; the original Task 28–30 flow is historical.
+- **1.0 — 2026-05-21:** Original 30-task production-module plan.
+
+> Contract precedence: for signature, deposit, and final-balance behavior, use
+> `docs/superpowers/specs/2026-05-21-ghl-invoice-flow-design.md` v1.3 and
+> `docs/superpowers/plans/2026-05-21-ghl-invoice-flow.md` v1.3.
+
+> Activation order: apply additive non-restrictive database prerequisites; obtain Todd's separate approval and configure rotated credentials/server-only secrets before the compatible build becomes active; activate the compatible server/API/UI; prove login, signing, webhook, and rollback readiness with non-customer fixtures; apply restrictive table/storage changes last. Additive prerequisites alone do not activate the boundary, and rollback never restores exposed credentials.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the internal `/production` module that tracks fence jobs from deposit confirmation through final payment, with an office dashboard for Todd and a field checklist for Ty.
@@ -35,7 +51,7 @@ src/hooks/useChecklist.ts            Checklist state + localStorage autosave + S
 src/hooks/usePhotoQueue.ts           Supabase Storage upload + GHL mirror + retry
 src/hooks/useIssue.ts                Issue create/resolve with auto-rules
 src/hooks/useNotifications.ts        Throttled SMS dispatcher
-src/components/production/PinGate.tsx           Multi-PIN gate (Todd 1122, Ty 8633), returns actor
+src/components/production/PinGate.tsx           Server-backed owner/field credential gate, returns authorized actor
 src/components/production/ViewToggle.tsx        Office/Field switcher, persists choice
 src/components/production/StatusBadge.tsx       Active/blocked/needs_review/complete pill
 src/components/production/StagePill.tsx         Stage label pill
@@ -541,11 +557,11 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { resolveActorFromPin, getStoredActor, storeActor, clearStoredActor } from './actor';
 
 describe('resolveActorFromPin', () => {
-  it('returns todd for 1122', () => {
-    expect(resolveActorFromPin('1122')).toBe('todd');
+  it('returns todd for the synthetic owner fixture', () => {
+    expect(resolveActorFromPin('7419')).toBe('todd');
   });
-  it('returns ty for 8633', () => {
-    expect(resolveActorFromPin('8633')).toBe('ty');
+  it('returns ty for the synthetic field fixture', () => {
+    expect(resolveActorFromPin('5806')).toBe('ty');
   });
   it('returns null for unknown PIN', () => {
     expect(resolveActorFromPin('0000')).toBeNull();
@@ -586,8 +602,8 @@ import type { Actor } from '../types/production';
 const SESSION_KEY = 'abrams_production_actor';
 
 const PIN_TO_ACTOR: Record<string, Actor> = {
-  '1122': 'todd',
-  '8633': 'ty',
+  '7419': 'todd', // synthetic test-only value
+  '5806': 'ty',   // synthetic test-only value
 };
 
 export function resolveActorFromPin(pin: string): Actor | null {
@@ -1817,7 +1833,7 @@ Expected: clean.
 
 ```bash
 git add src/components/production/PinGate.tsx
-git commit -m "feat(ui): production PinGate with multi-PIN (Todd 1122, Ty 8633)"
+git commit -m "feat(ui): production PinGate with server-backed owner/field access"
 ```
 
 ---
@@ -2958,7 +2974,7 @@ Open: `http://localhost:5173/production`
 
 - [ ] **Step 4: PIN gate**
 
-Verify gate appears. Try `0000` → fails with shake. Try `1122` → unlocks (actor=todd). Refresh → still unlocked (session persists). Open in a new private window, enter `8633` → unlocks (actor=ty).
+Verify gate appears. Use only synthetic non-production fixture credentials: an invalid fixture fails, the synthetic owner fixture unlocks as owner, refresh preserves the bounded session, and the synthetic field fixture unlocks only field-authorized actions.
 
 - [ ] **Step 5: End-to-end job lifecycle**
 

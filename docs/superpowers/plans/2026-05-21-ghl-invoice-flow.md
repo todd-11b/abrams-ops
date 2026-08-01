@@ -1,6 +1,18 @@
 # GHL-Invoice-Driven Deposit Flow Implementation Plan
 
+**Updated:** 2026-08-01
+**Version:** 1.3
+
+## Changelog
+
+- **1.3 — 2026-08-01:** Adopts the authoritative activation order: additive prerequisites; separately approved rotated credentials/secrets before activation; compatible build; non-customer proof; restrictive cutover last.
+- **1.2 — 2026-08-01:** Integrates the reviewed Task 8 correction with the source-only operator/proposal containment boundary; combined verification remains required before publication or activation.
+- **1.1 — 2026-08-01:** Adds Task 8 contract and source-only correction acceptance criteria.
+- **1.0 — 2026-05-21:** Original seven-task deposit-flow implementation plan.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+> **Activation gate:** Additive non-restrictive database prerequisites may be applied first but do not activate the new auth boundary. Todd must separately approve and configure rotated credentials plus required server-only secrets before the compatible server/API/UI build becomes active. Then prove login, signing, webhook, and rollback readiness with non-customer fixtures; apply the restrictive table/storage cutover last. Rollback never restores exposed credentials.
 
 **Goal:** Remove the simulated Stripe path from `SignPayView`, persist signed proposals as `pending_invoice` jobs, and route deposit confirmation through a new GHL `invoice.paid` webhook that flips the job to `paid` and reveals it on the `/production` dashboard.
 
@@ -1457,7 +1469,7 @@ Capture the preview URL.
 
 - [ ] **Step 2: Sign a real proposal end-to-end**
 
-On the preview URL, walk through `/consult` (PIN `8633`) against a real GHL contact (use a personal test contact, NOT a real customer). Reach the Sign step. Confirm:
+On the preview URL, walk through `/consult` using an owner-approved, server-configured operator credential against a non-customer fixture. Reach the Sign step. Confirm:
 
 - No Stripe `CardElement` appears anywhere.
 - The CTA says "Sign Proposal," not "Sign & Pay Deposit."
@@ -1547,6 +1559,29 @@ If env vars or workflow URLs needed any tweaks discovered during smoke testing, 
 git status
 # stage and commit any final adjustments
 ```
+
+---
+
+## Task 8: Final-balance routing reconciliation
+
+**Status:** Implemented on `main`; source corrections pending review
+
+**Authorized source-only scope (2026-08-01):**
+
+- Route `paymentType='final_balance'` through the existing authenticated webhook.
+- Accept both `unpaid` and `pending_invoice` as schema-valid payable states.
+- On a zero-row guarded PATCH, re-read state and claim idempotency only when
+  `final_payment_status='paid'`; otherwise return an error before downstream side effects.
+- Preserve duplicate-paid idempotency with no activity, stage, or note calls.
+- Log GHL stage/note network failures and HTTP non-2xx responses while keeping
+  Supabase authoritative and fail-soft.
+- Cover pending-invoice, zero-row paid race, zero-row unresolved race,
+  duplicate delivery, and GHL HTTP failure behavior in unit tests.
+- Run the full package test, build, and lint commands at one exact SHA. Existing
+  unrelated lint debt is reported but not included in this bounded correction.
+
+**Closed gates:** no commit, push, PR, deploy, environment change, live database
+mutation, GHL mutation, or live end-to-end run without separate authorization.
 
 ---
 

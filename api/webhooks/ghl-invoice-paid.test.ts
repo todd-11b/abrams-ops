@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// Version: 1.1 | Updated: 2026-08-01
+// Changelog: cover pending final invoices, guarded-update races, duplicates, and GHL HTTP failures.
 import handler from './ghl-invoice-paid';
 
 beforeEach(() => {
@@ -27,20 +29,30 @@ function makeReq(opts: { body: unknown; secret?: string; ip?: string }): Request
 
 interface FetchCall { url: string; init: RequestInit }
 
-function mockSupabaseAndGhl(opts: { jobLookupRows: unknown[]; patchUpdated?: unknown[] }) {
+function mockSupabaseAndGhl(opts: {
+  jobLookupRows: unknown[];
+  patchUpdated?: unknown[];
+  raceLookupRows?: unknown[];
+  ghlStageStatus?: number;
+  ghlNoteStatus?: number;
+}) {
   const calls: FetchCall[] = [];
+  let jobLookupCount = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     calls.push({ url, init: init || {} });
     const method = init?.method || 'GET';
     if (url.includes('/rest/v1/jobs') && method === 'GET') {
-      return new Response(JSON.stringify(opts.jobLookupRows), { status: 200 });
+      const rows = jobLookupCount++ === 0 ? opts.jobLookupRows : (opts.raceLookupRows ?? opts.jobLookupRows);
+      return new Response(JSON.stringify(rows), { status: 200 });
     }
     if (url.includes('/rest/v1/jobs') && method === 'PATCH') {
       const updated = opts.patchUpdated ?? [{ job_id: 'job-1', job_number: 'AF-2026-0010', deposit_status: 'paid', final_payment_status: 'paid' }];
       return new Response(JSON.stringify(updated), { status: 200 });
     }
     if (url.includes('/rest/v1/job_activity_log')) return new Response('[]', { status: 201 });
+    if (url.includes('/opportunities/')) return new Response('stage response', { status: opts.ghlStageStatus ?? 200 });
+    if (url.includes('/contacts/') && url.endsWith('/notes')) return new Response('note response', { status: opts.ghlNoteStatus ?? 200 });
     return new Response('{}', { status: 200 });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -217,7 +229,7 @@ describe('ghl-invoice-paid webhook', () => {
     const update = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
     expect(update).toBeDefined();
     expect(update!.url).toContain('proposal_id=eq.opp-1');
-    expect(update!.url).toContain('final_payment_status=eq.unpaid');
+    expect(update!.url).toContain('final_payment_status=in.(unpaid,pending_invoice)');
     const updateBody = JSON.parse(update!.init.body as string);
     expect(updateBody.final_payment_status).toBe('paid');
     expect(updateBody.final_payment_paid_at).toBeTruthy();
@@ -264,6 +276,97 @@ describe('ghl-invoice-paid webhook', () => {
     expect(calls.some(c => c.url.includes('/rest/v1/job_activity_log'))).toBe(false);
     expect(calls.some(c => c.url.includes('/opportunities/opp-1') && c.init.method === 'PUT')).toBe(false);
     expect(calls.some(c => c.url.includes('/contacts/c1/notes'))).toBe(false);
+  });
+
+  it('paymentType=final_balance processes pending_invoice instead of claiming already processed', async () => {
+    const { calls } = mockSupabaseAndGhl({ jobLookupRows: [{
+      job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+      deposit_status: 'paid', final_payment_status: 'pending_invoice',
+    }] });
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-1', invoiceId: 'inv-final-2', amountPaid: 8000, paymentType: 'final_balance' },
+    }));
+
+    expect(res.status).toBe(201);
+    const update = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
+    expect(update?.url).toContain('final_payment_status=in.(unpaid,pending_invoice)');
+    expect(calls.some(c => c.url.includes('/rest/v1/job_activity_log'))).toBe(true);
+  });
+
+  it('zero-row final PATCH returns already_processed only after re-read confirms paid', async () => {
+    const { calls } = mockSupabaseAndGhl({
+      jobLookupRows: [{
+        job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+        deposit_status: 'paid', final_payment_status: 'unpaid',
+      }],
+      patchUpdated: [],
+      raceLookupRows: [{
+        job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+        deposit_status: 'paid', final_payment_status: 'paid',
+      }],
+    });
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-1', invoiceId: 'inv-race', amountPaid: 8000, paymentType: 'final_balance' },
+    }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ already_processed: true, job_id: 'job-1' });
+    expect(calls.filter(c => c.url.includes('/rest/v1/jobs') && (c.init.method || 'GET') === 'GET')).toHaveLength(2);
+    expect(calls.some(c => c.url.includes('/rest/v1/job_activity_log'))).toBe(false);
+  });
+
+  it('zero-row final PATCH returns conflict when re-read is still not paid', async () => {
+    const { calls } = mockSupabaseAndGhl({
+      jobLookupRows: [{
+        job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+        deposit_status: 'paid', final_payment_status: 'pending_invoice',
+      }],
+      patchUpdated: [],
+      raceLookupRows: [{
+        job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+        deposit_status: 'paid', final_payment_status: 'pending_invoice',
+      }],
+    });
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-1', invoiceId: 'inv-conflict', amountPaid: 8000, paymentType: 'final_balance' },
+    }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'final payment state conflict' });
+    expect(calls.some(c => c.url.includes('/rest/v1/job_activity_log'))).toBe(false);
+  });
+
+  it('logs GHL stage and note HTTP failures while preserving the fail-soft response', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockSupabaseAndGhl({
+      jobLookupRows: [{
+        job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'opp-1',
+        deposit_status: 'paid', final_payment_status: 'unpaid',
+      }],
+      ghlStageStatus: 503,
+      ghlNoteStatus: 429,
+    });
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-1', invoiceId: 'inv-ghl-fail', amountPaid: 8000, paymentType: 'final_balance' },
+    }));
+
+    expect(res.status).toBe(201);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[ghl-invoice-paid] GHL Job Complete stage move returned 503',
+      'stage response',
+    );
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[ghl-invoice-paid] final paid note returned 429',
+      'note response',
+    );
   });
 
   it('missing paymentType defaults to deposit behavior (backwards-compatible)', async () => {

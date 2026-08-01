@@ -1,0 +1,21 @@
+-- Emergency rollback for containment v1.2; restore the compatible legacy application deployment first.
+GRANT SELECT, INSERT, UPDATE ON jobs, job_fence_specs, job_checklists, job_photos, job_issues TO anon, authenticated;
+GRANT SELECT, INSERT ON job_activity_log TO anon, authenticated;
+CREATE POLICY jobs_all ON jobs FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY fence_specs_all ON job_fence_specs FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY checklists_all ON job_checklists FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY photos_all ON job_photos FOR ALL TO public USING (true) WITH CHECK (true);
+CREATE POLICY issues_read ON job_issues FOR SELECT TO public USING (true);
+CREATE POLICY issues_insert ON job_issues FOR INSERT TO public WITH CHECK (true);
+CREATE POLICY issues_update ON job_issues FOR UPDATE TO public USING (true) WITH CHECK (true);
+CREATE POLICY activity_read ON job_activity_log FOR SELECT TO public USING (true);
+CREATE POLICY activity_insert ON job_activity_log FOR INSERT TO public WITH CHECK (true);
+DROP POLICY IF EXISTS "job_photos_insert" ON storage.objects;
+CREATE POLICY "job_photos_insert" ON storage.objects FOR INSERT TO public WITH CHECK (bucket_id = 'job-photos');
+DROP POLICY IF EXISTS "job_photos_select" ON storage.objects;
+CREATE POLICY "job_photos_select" ON storage.objects FOR SELECT TO public USING (bucket_id = 'job-photos');
+DROP FUNCTION IF EXISTS create_job_from_proposal_token(text,jsonb);
+DROP FUNCTION IF EXISTS consume_operator_login_attempt(text,boolean);
+DROP TABLE IF EXISTS operator_login_limits;
+DROP INDEX IF EXISTS jobs_proposal_id_unique;
+DROP TABLE IF EXISTS proposal_access_tokens;

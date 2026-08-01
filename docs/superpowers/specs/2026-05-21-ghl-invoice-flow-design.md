@@ -1,14 +1,25 @@
 # GHL-Invoice-Driven Deposit Flow — Design
 
 **Date:** 2026-05-21
-**Status:** Approved
+**Updated:** 2026-08-01
+**Version:** 1.3
+**Status:** Approved; Task 8 and containment integrated source-only, pending independent review
 **Supersedes:** Stripe-in-SignPayView portion of `2026-05-21-production-module-design.md`
+
+## Changelog
+
+- **1.3 — 2026-08-01:** Standardizes activation: additive non-restrictive prerequisites; separately approved rotated credentials/secrets before compatible-build activation; non-customer proof; restrictive cutover last.
+- **1.2 — 2026-08-01:** Integrates Task 8 final-balance behavior with opaque proposal tokens, exactly-once job creation, protected operator APIs, and the staged containment activation sequence.
+- **1.1 — 2026-08-01:** Records the approved single-endpoint final-balance path, schema-valid state handling, race verification, and fail-soft GHL HTTP observability.
+- **1.0 — 2026-05-21:** Approved invoice-driven deposit flow.
 
 ## Why
 
 The current `SignPayView.tsx` renders a Stripe `CardElement` but the payment is **simulated** — there is no `PaymentIntent`, no `confirmCardPayment`, and no Stripe secret key in the environment. Deposit collection actually happens (and will continue to happen) via GHL invoices sent to the customer outside the app. The simulated Stripe path is misleading and must be removed.
 
 Job creation must move off the signature event and onto the actual money-received event so that `/production` only shows jobs whose deposits have cleared.
+
+Activation is separately gated: additive database prerequisites alone do not activate the new authentication boundary. Todd must approve and configure rotated operator credentials and required server-only secrets before the compatible server/API/UI build becomes active. Non-customer login, signing, webhook, and rollback proof follows; restrictive table/storage cutover is last, and rollback never restores exposed credentials.
 
 ## Flow (target state)
 
@@ -258,6 +269,30 @@ The existing `job_created` type is retired from this flow (signature is now the 
 - Ad-hoc invoice support (invoice not tied to an opportunity).
 - GHL invoice creation via API from the signature handler (deferred to a GHL workflow Todd configures in GHL UI).
 - HMAC payload-signature verification on the webhook.
+
+## Task 8 addendum — final-balance invoice path
+
+The same authenticated endpoint handles final-balance payment notifications when
+`paymentType='final_balance'`. Missing `paymentType` remains deposit behavior for
+backwards compatibility; unknown values return 400.
+
+The final-balance path:
+
+1. Reads the job by `proposal_id` and returns idempotent success only when
+   `final_payment_status='paid'`.
+2. Atomically updates either schema-valid non-paid state (`unpaid` or
+   `pending_invoice`) to `paid` and sets `final_payment_paid_at`.
+3. If the guarded PATCH changes zero rows, re-reads the job. It returns
+   `already_processed` only when that read confirms `paid`; otherwise it returns
+   an error without activity or GHL side effects.
+4. Appends `final_payment_via_invoice` with `source='workflow'`.
+5. Fail-soft moves the GHL opportunity to `GHL_STAGE_JOB_COMPLETE` and posts the
+   final-payment note. Network exceptions and HTTP non-2xx responses are logged;
+   neither rolls back authoritative Supabase state.
+
+This addendum supersedes the production-module V1 deferral that described final
+payment as internal-only. It does not authorize deployment, environment changes,
+or live end-to-end testing.
 
 ## Settled decisions — do not re-litigate
 
