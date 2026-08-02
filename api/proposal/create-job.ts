@@ -44,8 +44,12 @@ export default async function handler(req: Request) {
   const [proposal] = lookup.ok ? await lookup.json() as Array<{ contact_id: string; proposal_id: string; fence_spec: { proposal_total?: number } | null }> : [];
   const failures: string[] = [];
   const apiKey = process.env.GHL_API_KEY ?? '';
-  const mirrored = Boolean(job.created && proposal && apiKey);
-  if (mirrored) {
+  // Only a duplicate signing has nothing to mirror; anything else that stops
+  // the mirror on a genuinely new job is an observable failure, not a skip.
+  if (job.created && !proposal) failures.push('token:lookup_failed');
+  if (job.created && !apiKey) failures.push('crm:not_configured');
+  if (job.created && proposal && !proposal.fence_spec) failures.push('fence_spec:missing');
+  if (job.created && proposal && apiKey) {
     const statusFailure = await ghl(`/opportunities/${encodeURIComponent(proposal.proposal_id)}`, apiKey, { method: 'PUT', body: JSON.stringify({ status: 'won' }) });
     if (statusFailure) failures.push(`opportunity:${statusFailure}`);
     // Deposit comes from the token's stored total, never from the signing request.
@@ -56,6 +60,6 @@ export default async function handler(req: Request) {
     const noteFailure = await ghl(`/contacts/${encodeURIComponent(proposal.contact_id)}/notes`, apiKey, { method: 'POST', body: JSON.stringify({ body: note }) });
     if (noteFailure) failures.push(`note:${noteFailure}`);
   }
-  const mirrorStatus = mirrored ? (failures.length ? 'partial_failure' : 'complete') : 'skipped';
+  const mirrorStatus = !job.created ? 'skipped' : failures.length ? 'partial_failure' : 'complete';
   return secureJson({ ...job, mirror_status: mirrorStatus, mirror_failures: failures }, { status: failures.length ? 202 : (job.created ? 201 : 200) });
 }

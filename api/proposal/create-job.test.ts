@@ -27,7 +27,7 @@ describe('atomic proposal signing', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input); calls.push(url);
       if (url.includes('/rpc/create_job_from_proposal_token')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
-      if (url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1' }]), { status: 200 });
+      if (url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]), { status: 200 });
       return new Response('{}', { status: 200 });
     }));
     const res = await handler(request({ token, proposal_display_id: 'P-1' }));
@@ -44,7 +44,7 @@ describe('atomic proposal signing', () => {
         return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
       }
       if (url.includes('proposal_access_tokens')) {
-        return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1' }]), { status: 200 });
+        return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]), { status: 200 });
       }
       ghlCalls.push({ url, init });
       return new Response('{}', { status: 200 });
@@ -65,7 +65,7 @@ describe('atomic proposal signing', () => {
       init: { method: 'POST' },
     });
     expect(JSON.parse(String(ghlCalls[1].init?.body))).toEqual({
-      body: '[AUTO] Proposal signed — invoice pending\nProposal P-42',
+      body: '[AUTO] Proposal signed — invoice pending\nProposal P-42\nDeposit due: $500',
     });
     expect(ghlCalls.some(({ url, init }) =>
       /pipeline|stage/i.test(url) || /pipelineStageId/.test(String(init?.body)),
@@ -74,7 +74,7 @@ describe('atomic proposal signing', () => {
 
   it('returns the existing job for a duplicate without repeating GHL effects', async () => {
     const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { const url=String(input); calls.push(url); if (url.includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: false }]), { status: 200 }); return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1' }]), { status: 200 }); }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { const url=String(input); calls.push(url); if (url.includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: false }]), { status: 200 }); return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]), { status: 200 }); }));
     const res = await handler(request({ token }));
     expect(res.status).toBe(200); expect(calls.some((url) => url.includes('leadconnector'))).toBe(false);
   });
@@ -84,7 +84,7 @@ describe('atomic proposal signing', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/rpc/')) { rpcCalls += 1; return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: rpcCalls === 1 }]), { status: 200 }); }
-      if (url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1' }]), { status: 200 });
+      if (url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]), { status: 200 });
       ghlCalls += 1; return new Response('{}', { status: 200 });
     }));
     const first = await handler(request({ token: 'a'.repeat(64) }));
@@ -95,7 +95,7 @@ describe('atomic proposal signing', () => {
   });
 
   it('reports CRM non-2xx as observable partial failure', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { const url=String(input); if (url.includes('/rpc/')) return new Response(JSON.stringify([{ job_id:'j1',job_number:'AF-1',created:true }]),{status:200}); if(url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{contact_id:'c1',proposal_id:'o1'}]),{status:200}); return new Response('{}',{status:500}); }));
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { const url=String(input); if (url.includes('/rpc/')) return new Response(JSON.stringify([{ job_id:'j1',job_number:'AF-1',created:true }]),{status:200}); if(url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{contact_id:'c1',proposal_id:'o1',fence_spec:{proposal_total:1000}}]),{status:200}); return new Response('{}',{status:500}); }));
     const res = await handler(request({ token })); expect(res.status).toBe(202); expect((await res.json()).mirror_status).toBe('partial_failure');
   });
 
@@ -116,13 +116,25 @@ describe('atomic proposal signing', () => {
     expect(JSON.parse(String(note?.body)).body).toContain('Deposit due: $6,000');
   });
 
-  it('reports a skipped mirror when there is nothing to mirror', async () => {
-    process.env.GHL_API_KEY = '';
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
-      return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: null }]), { status: 200 });
+  it('only reports "skipped" for a duplicate signing, and names what stopped a real mirror', async () => {
+    const respond = (created: boolean, tokenRow: unknown) => vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created }]), { status: 200 });
+      if (String(input).includes('proposal_access_tokens')) return new Response(JSON.stringify(tokenRow), { status: 200 });
+      return new Response('{}', { status: 200 });
     }));
+
+    respond(false, []);
     expect((await (await handler(request({ token }))).json()).mirror_status).toBe('skipped');
+
+    respond(true, []);
+    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_status: 'partial_failure', mirror_failures: ['token:lookup_failed'] });
+
+    respond(true, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: null }]);
+    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_failures: ['fence_spec:missing'] });
+
+    process.env.GHL_API_KEY = '';
+    respond(true, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]);
+    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_failures: ['crm:not_configured'] });
   });
 
   it('does not report success when the transaction fails', async () => {
