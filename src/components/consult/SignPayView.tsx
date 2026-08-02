@@ -41,7 +41,11 @@ export const SignPayView = ({ form, onBack, proposalId, proposalToken }: Props) 
       if (!resp.ok) {
         const t = await resp.text().catch(() => '');
         console.error('[SignPayView] create-job failed:', resp.status, t);
-        setError("We couldn't record your signature. Please try again or call us.");
+        let reason: string | null = null;
+        if (resp.status === 409) {
+          try { reason = (JSON.parse(t) as { error?: string })?.error ?? null; } catch { reason = null; }
+        }
+        setError(reason || "We couldn't record your signature. Please try again or call us.");
         return;
       }
 

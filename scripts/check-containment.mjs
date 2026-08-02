@@ -92,7 +92,7 @@ for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create
 if (!additive.includes('v_created := FOUND;') || !additive.includes('v_job.job_number, v_created')) throw new Error('cross-token conflict result is not deduplicated');
 const restrictive = fs.readFileSync('supabase/migrations/20260801000001_operator_containment_restrict.sql', 'utf8');
 if (!restrictive.includes('REVOKE ALL ON jobs') || /CREATE POLICY\s+\w+\s+ON\s+\w+\s+FOR ALL\s+TO public\s+USING \(true\)/i.test(restrictive)) throw new Error('containment migration is permissive');
-const rollback = fs.readFileSync('supabase/migrations/20260801000002_operator_containment_rollback.sql', 'utf8');
+const rollback = fs.readFileSync('supabase/rollback/20260801000002_operator_containment_rollback.sql', 'utf8');
 for (const policy of ['job_photos_insert', 'job_photos_select']) {
   if (!rollback.includes(`CREATE POLICY "${policy}"`)) throw new Error(`rollback does not restore ${policy}`);
 }

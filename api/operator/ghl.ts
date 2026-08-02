@@ -71,7 +71,12 @@ export default async function handler(req: Request) {
   if (!path) return secureJson({ error: 'invalid action or identifier' }, { status: 400 });
   const headers: Record<string,string> = { Authorization: `Bearer ${apiKey}`, Version: '2021-07-28' };
   if (!multipart) headers['Content-Type'] = 'application/json';
-  const upstream = await fetch(`${BASE}${path}`, { method, headers, body: multipart ?? (payload === undefined ? undefined : JSON.stringify(payload)) });
+  let upstream: Response;
+  try {
+    upstream = await fetch(`${BASE}${path}`, { method, headers, body: multipart ?? (payload === undefined ? undefined : JSON.stringify(payload)) });
+  } catch {
+    return secureJson({ error: 'CRM unreachable' }, { status: 502 });
+  }
   const text = await upstream.text();
   if (!upstream.ok) return secureJson({ error: 'CRM request failed', status: upstream.status }, { status: 502 });
   return new Response(text || '{}', { status: 200, headers: { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json', 'Cache-Control': 'no-store' } });

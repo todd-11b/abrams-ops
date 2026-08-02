@@ -1,3 +1,4 @@
+-- NOT A MIGRATION: kept outside supabase/migrations so a migration runner never applies it. Run manually, by hand, only during an approved rollback.
 -- Emergency rollback for containment v1.2; restore the compatible legacy application deployment first.
 GRANT SELECT, INSERT, UPDATE ON jobs, job_fence_specs, job_checklists, job_photos, job_issues TO anon, authenticated;
 GRANT SELECT, INSERT ON job_activity_log TO anon, authenticated;

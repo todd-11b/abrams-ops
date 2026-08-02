@@ -79,6 +79,16 @@ describe('new consult opportunities', () => {
     expect(created[0]).toMatchObject({ pipelineId: 'client-pipeline' });
     expect(created[0]).not.toHaveProperty('pipelineStageId');
   });
+
+  it('reports an unreachable CRM as a gateway failure rather than crashing', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
+
+    const response = await post(ghlHandler, '/api/operator/ghl', token, { action: 'fetchContacts' });
+
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toBe('CRM unreachable');
+  });
 });
 
 describe('signed photo paths', () => {

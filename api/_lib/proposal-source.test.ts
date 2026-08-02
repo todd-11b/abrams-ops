@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveFenceSpec, readStoredProposal } from './proposal-source';
+import { deriveFenceSpec, readStoredProposal, specMatches } from './proposal-source';
 import type { ConsultFormData } from '../../src/components/consult/consultTypes';
 
 const storedProposal = {
@@ -25,6 +25,14 @@ describe('trusted proposal snapshot', () => {
     // 13 sections at 300, plus a 450 walk gate and 500 of demo.
     expect(spec?.proposal_total).toBe(4850);
     expect(spec?.total_sections).toBe(13);
+  });
+
+  it('treats a re-priced quote as no longer matching a frozen token snapshot', () => {
+    const frozen = deriveFenceSpec(readStoredProposal(contact));
+    const reprice = { ...storedProposal, fenceLines: [{ ...storedProposal.fenceLines[0], linearFeet: 300 }] } as ConsultFormData;
+    expect(specMatches(frozen, deriveFenceSpec(storedProposal))).toBe(true);
+    expect(specMatches(frozen, deriveFenceSpec(reprice))).toBe(false);
+    expect(specMatches(frozen, null)).toBe(false);
   });
 
   it('returns null when the contact has no saved proposal to trust', () => {

@@ -23,6 +23,17 @@ export interface FenceSpec {
   proposal_total: number;
 }
 
+/**
+ * True when a token's frozen snapshot still matches the quote saved in the
+ * CRM. A superseded link must never be rendered or signed: the customer would
+ * see the current price while the job recorded the frozen one.
+ */
+export function specMatches(a: FenceSpec | null | undefined, b: FenceSpec | null | undefined): boolean {
+  if (!a || !b) return false;
+  const shape = (s: FenceSpec) => JSON.stringify([s.proposal_total, s.total_lf, s.total_sections, s.fence_lines, s.gates, s.addons]);
+  return shape(a) === shape(b);
+}
+
 export async function fetchGhlContact(contactId: string, apiKey: string): Promise<{ status: number; contact: GhlContact | null }> {
   let response: Response;
   try {

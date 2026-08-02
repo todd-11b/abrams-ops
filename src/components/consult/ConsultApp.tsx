@@ -108,6 +108,7 @@ export const ConsultApp = () => {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [contactsError, setContactsError] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
@@ -166,9 +167,11 @@ export const ConsultApp = () => {
           opportunityId: "",
         }));
         setContacts(list);
+        setContactsError("");
       } catch (err) {
         console.error("Fetch contacts failed", err);
         setContacts([]);
+        setContactsError(err instanceof Error ? err.message : "Could not reach the CRM.");
       } finally {
         setLoadingContacts(false);
       }
@@ -686,7 +689,8 @@ export const ConsultApp = () => {
         form={form}
         totals={calcTotals(form)}
         onBack={() => setStep("consult")}
-        onPresent={async () => { try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
+        onPresent={async () => { setSaveStatus('idle'); setSaveMessage(''); try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
+        errorMessage={saveStatus === 'error' ? saveMessage : ''}
         onSendForReview={() => handleSendForReview(false)}
         onRegenerateInvoice={() => handleSendForReview(true)}
         onSendToCustomer={handleSendToCustomer}
@@ -817,7 +821,11 @@ export const ConsultApp = () => {
                   ))}
                   {contacts.length === 0 && !searching && (
                     <div className="text-center py-10 bg-white rounded-2xl border border-gray-200">
-                      <p className="text-gray-500 text-sm">No customers found.</p>
+                      {contactsError ? (
+                        <p className="text-red-500 text-sm px-4">Could not load customers: {contactsError}</p>
+                      ) : (
+                        <p className="text-gray-500 text-sm">No customers found.</p>
+                      )}
                     </div>
                   )}
                 </div>
