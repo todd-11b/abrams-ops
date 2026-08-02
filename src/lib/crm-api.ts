@@ -20,6 +20,7 @@ export const crmApi = {
   addTags: (contactId: string, tags: string[]) => action('addTags', { contactId, tags }),
   updateOpportunityStatus: (opportunityId: string, status: string, pipelineStageId?: string) => action('updateOpportunityStatus', { opportunityId, status, pipelineStageId }),
   createOpportunity: (input: CreateOpportunityInput) => action('createOpportunity', { ...input }),
+  updateOpportunityValue: (opportunityId: string, monetaryValue: number) => action('updateOpportunityValue', { opportunityId, monetaryValue }),
   getPipelines: () => action('getPipelines'),
   moveOpportunityToStage: (opportunityId: string, pipelineStageId: string) => action('moveOpportunityToStage', { opportunityId, pipelineStageId }),
   async uploadPhoto(contactId: string, file: File) {

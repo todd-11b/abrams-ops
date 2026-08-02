@@ -62,6 +62,7 @@ export default async function handler(req: Request) {
       payload = { pipelineId, locationId, contactId, name, status: 'open', ...(stageId ? { pipelineStageId: stageId } : {}), ...(monetaryValue === undefined ? {} : { monetaryValue }) };
       break;
     }
+    case 'updateOpportunityValue': { const value = Number(body.monetaryValue); if (!opportunityId || !Number.isFinite(value) || value < 0 || value > 10_000_000) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { monetaryValue: value }; break; }
     case 'getPipelines': path = `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`; break;
     case 'updateOpportunityStatus': if (!opportunityId || typeof body.status !== 'string' || (body.pipelineStageId && !id(body.pipelineStageId))) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status, ...(body.pipelineStageId ? { pipelineStageId: body.pipelineStageId } : {}) }; break;
     case 'moveOpportunityToStage': if (!opportunityId || !id(body.pipelineStageId)) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { pipelineStageId: body.pipelineStageId }; break;

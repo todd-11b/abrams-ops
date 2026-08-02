@@ -380,6 +380,10 @@ export const ConsultApp = () => {
         opportunityId = created.opportunity?.id ?? "";
         if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
         updateForm({ opportunityId });
+      } else if (realContactId && opportunityId) {
+        // The value is only set at creation, so a re-priced quote would leave
+        // the pipeline reporting the original amount.
+        await crmApi.updateOpportunityValue(opportunityId, totals.grandTotal);
       }
 
       // The draft written above predates the opportunity, so re-persist it with

@@ -80,6 +80,24 @@ describe('new consult opportunities', () => {
     expect(created[0]).not.toHaveProperty('pipelineStageId');
   });
 
+  it('re-prices an existing opportunity with a bounded numeric value', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    const sent: Array<{ url: string; body: unknown }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const ok = await post(ghlHandler, '/api/operator/ghl', token, { action: 'updateOpportunityValue', opportunityId: 'o1', monetaryValue: 7200 });
+    expect(ok.status).toBe(200);
+    expect(sent[0]).toMatchObject({ url: 'https://services.leadconnectorhq.com/opportunities/o1', body: { monetaryValue: 7200 } });
+
+    for (const monetaryValue of ['9,000', -1, 10_000_001, {}]) {
+      expect((await post(ghlHandler, '/api/operator/ghl', token, { action: 'updateOpportunityValue', opportunityId: 'o1', monetaryValue })).status).toBe(400);
+    }
+    expect(sent).toHaveLength(1);
+  });
+
   it('reports an unreachable CRM as a gateway failure rather than crashing', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
