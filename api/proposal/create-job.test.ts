@@ -133,9 +133,6 @@ describe('atomic proposal signing', () => {
     respond(true, []);
     expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_status: 'partial_failure', mirror_failures: ['token:lookup_failed'] });
 
-    respond(true, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: null }]);
-    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_failures: ['fence_spec:missing'] });
-
     process.env.GHL_API_KEY = '';
     respond(true, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]);
     expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_failures: ['crm:not_configured'] });
@@ -159,6 +156,18 @@ describe('atomic proposal signing', () => {
 
     expect(res.status).toBe(409);
     expect(calls.some((url) => url.includes('/rpc/'))).toBe(false);
+  });
+
+  it('asks for a new link when the transaction refuses an unpriced token', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/rpc/')) return new Response(JSON.stringify({ message: 'unpriced_token' }), { status: 400 });
+      return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: null }]), { status: 200 });
+    }));
+
+    const res = await handler(request({ token }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toContain('out of date');
   });
 
   it('does not report success when the transaction fails', async () => {

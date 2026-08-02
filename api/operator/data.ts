@@ -52,7 +52,10 @@ export default async function handler(req: Request) {
   for (const filter of body.filters ?? []) {
     if (!filter || typeof filter !== 'object' || !config.filters.includes(filter.column) || !['eq','is','in'].includes(filter.type)) return secureJson({ error: 'filter not allowed' }, { status: 400 });
     if (filter.type === 'in' && !Array.isArray(filter.value)) return secureJson({ error: 'filter not allowed' }, { status: 400 });
-    const value = filter.type === 'in' ? `(${filter.value.map((v: unknown) => encodeURIComponent(String(v))).join(',')})` : encodeURIComponent(String(filter.value));
+    // encodeURIComponent leaves parentheses alone, and an unescaped one would
+    // close the `in` group early.
+    const member = (v: unknown) => encodeURIComponent(String(v)).replace(/\(/g, '%28').replace(/\)/g, '%29');
+    const value = filter.type === 'in' ? `(${filter.value.map(member).join(',')})` : member(filter.value);
     query += `${query ? '&' : ''}${filter.column}=${filter.type}.${value}`;
   }
   if (body.order) {

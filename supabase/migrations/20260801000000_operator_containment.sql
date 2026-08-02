@@ -77,6 +77,10 @@ BEGIN
     WHERE token_hash = p_token_hash AND purpose = 'proposal_view_sign'
     FOR UPDATE;
   IF NOT FOUND OR v_token.expires_at <= now() THEN RAISE EXCEPTION 'invalid_or_expired_token' USING ERRCODE = 'P0001'; END IF;
+  -- A token with no snapshot predates server-derived pricing. jobs.proposal_id
+  -- is unique, so creating an unpriced job here would be unrecoverable without
+  -- manual surgery; refuse and let the operator issue a new link instead.
+  IF v_token.fence_spec IS NULL AND v_token.job_id IS NULL THEN RAISE EXCEPTION 'unpriced_token' USING ERRCODE = 'P0001'; END IF;
   IF v_token.job_id IS NOT NULL THEN
     SELECT * INTO v_job FROM jobs WHERE jobs.job_id = v_token.job_id;
     RETURN QUERY SELECT v_job.job_id, v_job.job_number, false; RETURN;
@@ -86,7 +90,7 @@ BEGIN
     ON CONFLICT (proposal_id) WHERE proposal_id IS NOT NULL DO NOTHING RETURNING * INTO v_job;
   v_created := FOUND;
   IF NOT FOUND THEN SELECT * INTO v_job FROM jobs WHERE proposal_id = v_token.proposal_id; END IF;
-  IF v_token.fence_spec IS NOT NULL AND NOT EXISTS (SELECT 1 FROM job_fence_specs WHERE job_fence_specs.job_id = v_job.job_id) THEN
+  IF NOT EXISTS (SELECT 1 FROM job_fence_specs WHERE job_fence_specs.job_id = v_job.job_id) THEN
     INSERT INTO job_fence_specs(job_id, fence_lines, gates, addons, total_sections, total_lf, proposal_total)
     SELECT v_job.job_id, COALESCE(v_token.fence_spec->'fence_lines','[]'), COALESCE(v_token.fence_spec->'gates','[]'),
       COALESCE(v_token.fence_spec->'addons','[]'), COALESCE((v_token.fence_spec->>'total_sections')::integer,0),

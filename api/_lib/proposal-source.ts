@@ -24,13 +24,28 @@ export interface FenceSpec {
 }
 
 /**
+ * Serialises with object keys in a fixed order. One side of a snapshot
+ * comparison has been through a `jsonb` column, which does not preserve the
+ * key order it was given, so a plain `JSON.stringify` differs on identical
+ * data.
+ */
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([, v]) => v !== undefined)
+    .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0));
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`;
+}
+
+/**
  * True when a token's frozen snapshot still matches the quote saved in the
  * CRM. A superseded link must never be rendered or signed: the customer would
  * see the current price while the job recorded the frozen one.
  */
 export function specMatches(a: FenceSpec | null | undefined, b: FenceSpec | null | undefined): boolean {
   if (!a || !b) return false;
-  const shape = (s: FenceSpec) => JSON.stringify([s.proposal_total, s.total_lf, s.total_sections, s.fence_lines, s.gates, s.addons]);
+  const shape = (s: FenceSpec) => canonical([s.proposal_total, s.total_lf, s.total_sections, s.fence_lines, s.gates, s.addons]);
   return shape(a) === shape(b);
 }
 

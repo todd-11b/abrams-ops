@@ -47,8 +47,9 @@ export default async function handler(req: Request) {
   });
   if (!rpc.ok) {
     const detail = await rpc.text().catch(() => '');
-    const invalid = detail.includes('invalid_or_expired_token');
-    return secureJson({ error: invalid ? 'proposal token invalid or expired' : 'job transaction failed' }, { status: invalid ? 401 : 502 });
+    if (detail.includes('invalid_or_expired_token')) return secureJson({ error: 'proposal token invalid or expired' }, { status: 401 });
+    if (detail.includes('unpriced_token')) return secureJson({ error: 'this proposal link is out of date — ask for a new one' }, { status: 409 });
+    return secureJson({ error: 'job transaction failed' }, { status: 502 });
   }
   const [job] = await rpc.json() as Array<{ job_id: string; job_number: string; created: boolean }>;
   if (!job) return secureJson({ error: 'job transaction returned no result' }, { status: 502 });
@@ -58,7 +59,6 @@ export default async function handler(req: Request) {
   // the mirror on a genuinely new job is an observable failure, not a skip.
   if (job.created && !proposal) failures.push('token:lookup_failed');
   if (job.created && !apiKey) failures.push('crm:not_configured');
-  if (job.created && proposal && !proposal.fence_spec) failures.push('fence_spec:missing');
   if (job.created && proposal && apiKey) {
     const statusFailure = await ghl(`/opportunities/${encodeURIComponent(proposal.proposal_id)}`, apiKey, { method: 'PUT', body: JSON.stringify({ status: 'won' }) });
     if (statusFailure) failures.push(`opportunity:${statusFailure}`);

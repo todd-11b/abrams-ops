@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveFenceSpec, readStoredProposal, specMatches } from './proposal-source';
+import { deriveFenceSpec, readStoredProposal, specMatches, type FenceSpec } from './proposal-source';
 import type { ConsultFormData } from '../../src/components/consult/consultTypes';
 
 const storedProposal = {
@@ -33,6 +33,24 @@ describe('trusted proposal snapshot', () => {
     expect(specMatches(frozen, deriveFenceSpec(storedProposal))).toBe(true);
     expect(specMatches(frozen, deriveFenceSpec(reprice))).toBe(false);
     expect(specMatches(frozen, null)).toBe(false);
+  });
+
+  it('still matches a snapshot whose keys came back reordered from jsonb', () => {
+    const reorder = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reorder);
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(
+          Object.entries(value as Record<string, unknown>)
+            .reverse()
+            .map(([k, v]) => [k, reorder(v)]),
+        );
+      }
+      return value;
+    };
+    const frozen = deriveFenceSpec(storedProposal);
+    const roundTripped = reorder(frozen) as FenceSpec;
+    expect(JSON.stringify(roundTripped)).not.toBe(JSON.stringify(frozen));
+    expect(specMatches(frozen, roundTripped)).toBe(true);
   });
 
   it('returns null when the contact has no saved proposal to trust', () => {
