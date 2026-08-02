@@ -18,6 +18,8 @@ const requiredServer = [
 const optionalServer = [
   'OPERATOR_SESSION_VERSION',
   'GHL_OUTBOUND_IP_PREFIXES',
+  'GHL_SALES_PIPELINE_ID',
+  'GHL_SALES_PIPELINE_STAGE_ID',
 ];
 const requiredPublic = [
   'VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID',
