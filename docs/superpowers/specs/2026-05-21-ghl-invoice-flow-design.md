@@ -106,7 +106,7 @@ Why: GHL retries webhooks on non-2xx responses. A noisy retry must not double-po
 
 ## SMS-on-failure path
 
-When the webhook handler hits either of these conditions, it fires an SMS to Todd via the existing GHL conversations message API to `VITE_GHL_TODD_CONTACT_ID` = `Z3OW0NMGj3sk93ofJuVq`:
+When the webhook handler hits either of these conditions, it fires an SMS to Todd via the existing GHL conversations message API to `VITE_GHL_TODD_CONTACT_ID` = `ExampleContactId12345`:
 
 **No-match (422):**
 ```
@@ -220,7 +220,7 @@ Env vars required (server-only, no `VITE_` prefix):
 - `GHL_WEBHOOK_SECRET` — new
 - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — existing
 - `GHL_API_KEY`, `GHL_STAGE_JOB_CREATED` — existing
-- `GHL_TODD_CONTACT_ID` — NEW server-only copy of the existing `VITE_GHL_TODD_CONTACT_ID` (value: `Z3OW0NMGj3sk93ofJuVq`). Required because edge functions must not read `VITE_*` env vars (those are client-bundled).
+- `GHL_TODD_CONTACT_ID` — NEW server-only copy of the existing `VITE_GHL_TODD_CONTACT_ID` (value: `ExampleContactId12345`). Required because edge functions must not read `VITE_*` env vars (those are client-bundled).
 
 ### `src/components/production/*` — dashboard filter
 

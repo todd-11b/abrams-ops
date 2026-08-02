@@ -35,7 +35,7 @@ export function validateProductionEnv(env: RawEnv): ProductionEnvConfig {
         `Run \`vercel env pull .env.local\` and restart the dev server.`
     );
   }
-  // GHL v2 contact IDs are short alphanumeric tokens (e.g. Z3OW0NMGj3sk93ofJuVq).
+  // GHL v2 contact IDs are short alphanumeric tokens (e.g. ExampleContactId12345).
   if (!/^[A-Za-z0-9]{16,32}$/.test(env.VITE_GHL_TODD_CONTACT_ID!)) {
     throw new Error(
       `VITE_GHL_TODD_CONTACT_ID must be a GHL contact id (alphanumeric, 16–32 chars). Got: ${env.VITE_GHL_TODD_CONTACT_ID}`

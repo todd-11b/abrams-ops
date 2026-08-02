@@ -1373,7 +1373,7 @@ GHL_WEBHOOK_SECRET=
 
 # Server-side copy of VITE_GHL_TODD_CONTACT_ID. Required because edge
 # functions cannot read VITE_* env vars. Value is the same contact id
-# (currently Z3OW0NMGj3sk93ofJuVq).
+# (currently ExampleContactId12345).
 GHL_TODD_CONTACT_ID=
 
 # Pipeline + stage IDs the invoice-paid webhook moves the GHL opportunity to.
@@ -1402,7 +1402,7 @@ Add the four new vars to `~/abrams-ops/.env.local`. The file already has `SUPABA
 
 ```
 GHL_WEBHOOK_SECRET=<output of openssl rand -hex 16>
-GHL_TODD_CONTACT_ID=Z3OW0NMGj3sk93ofJuVq
+GHL_TODD_CONTACT_ID=ExampleContactId12345
 GHL_STAGE_JOB_CREATED=ecf63d46-164d-4db0-b6ca-4eb870070b2d
 GHL_OUTBOUND_IP_PREFIXES=
 ```

@@ -7,7 +7,7 @@ const VALID = {
   VITE_GHL_STAGE_SCHEDULED: 's2',
   VITE_GHL_STAGE_IN_INSTALL: 's3',
   VITE_GHL_STAGE_JOB_COMPLETE: 's4',
-  VITE_GHL_TODD_CONTACT_ID: 'Z3OW0NMGj3sk93ofJuVq',
+  VITE_GHL_TODD_CONTACT_ID: 'ExampleContactId12345',
 };
 
 describe('validateProductionEnv', () => {
@@ -33,7 +33,7 @@ describe('validateProductionEnv', () => {
     const cfg = validateProductionEnv(VALID);
     expect(cfg.pipelineId).toBe('p1');
     expect(cfg.stages.job_created).toBe('s1');
-    expect(cfg.toddContactId).toBe('Z3OW0NMGj3sk93ofJuVq');
+    expect(cfg.toddContactId).toBe('ExampleContactId12345');
   });
 
   it('throws when a required var is whitespace-only', () => {

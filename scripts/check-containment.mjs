@@ -1,4 +1,68 @@
 import fs from 'node:fs';
+import { execFileSync } from 'node:child_process';
+
+const requiredServer = [
+  'SUPABASE_URL',
+  'SUPABASE_SERVICE_ROLE_KEY',
+  'GHL_API_KEY',
+  'GHL_LOCATION_ID',
+  'GHL_WEBHOOK_SECRET',
+  'GHL_TODD_CONTACT_ID',
+  'GHL_STAGE_JOB_CREATED',
+  'GHL_STAGE_JOB_COMPLETE',
+  'OPERATOR_SESSION_SECRET',
+  'OPERATOR_TODD_PIN',
+  'OPERATOR_TY_PIN',
+  'OPERATOR_RATE_LIMIT_PEPPER',
+];
+const optionalServer = [
+  'OPERATOR_SESSION_VERSION',
+  'GHL_OUTBOUND_IP_PREFIXES',
+];
+const requiredPublic = [
+  'VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID',
+  'VITE_GHL_STAGE_JOB_CREATED',
+  'VITE_GHL_STAGE_SCHEDULED',
+  'VITE_GHL_STAGE_IN_INSTALL',
+  'VITE_GHL_STAGE_JOB_COMPLETE',
+  'VITE_GHL_TODD_CONTACT_ID',
+];
+const obsoleteBrowser = [
+  'VITE_SUPABASE_URL',
+  'VITE_SUPABASE_ANON_KEY',
+  'VITE_GHL_API_KEY',
+  'VITE_GHL_LOCATION_ID',
+  'VITE_STRIPE_PUBLISHABLE_KEY',
+];
+
+const envExample = fs.readFileSync('.env.example', 'utf8');
+const assignments = [...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
+const actualNames = assignments.map((match) => match[1]);
+const expectedNames = [...requiredPublic, ...requiredServer, ...optionalServer];
+if (new Set(actualNames).size !== actualNames.length) throw new Error('.env.example contains duplicate names');
+if (actualNames.length !== expectedNames.length || expectedNames.some((name) => !actualNames.includes(name))) {
+  throw new Error('.env.example names do not match the source contract');
+}
+if (assignments.some((match) => match[2] !== '')) throw new Error('.env.example must not contain example values');
+if (obsoleteBrowser.some((name) => envExample.includes(name))) throw new Error('.env.example contains obsolete browser variables');
+if (!envExample.includes('Client-public routing (browser-exposed, required)') ||
+    !envExample.includes('Server-only secrets (required; never browser-exposed)') ||
+    !envExample.includes('Server-only configuration (required)') ||
+    !envExample.includes('Server-only configuration (optional/defaulted)')) {
+  throw new Error('.env.example classification headings are missing');
+}
+
+const formerContactIdentifier = process.env.FORMER_GHL_CONTACT_ID;
+if (formerContactIdentifier) {
+  const trackedPaths = execFileSync('git', ['ls-files', '-z'])
+    .toString()
+    .split('\0')
+    .filter(Boolean);
+  const identifier = Buffer.from(formerContactIdentifier);
+  if (trackedPaths.some((file) => fs.readFileSync(file).includes(identifier))) {
+    throw new Error('former GHL contact identifier remains in the tracked tree');
+  }
+}
 
 const files = fs.readdirSync('src', { recursive: true }).filter((file) => typeof file === 'string' && /\.(ts|tsx)$/.test(file));
 const client = files.map((file) => fs.readFileSync(`src/${file}`, 'utf8')).join('\n');
