@@ -28,6 +28,7 @@ export default function ProductionJob() {
   const [blockOpen, setBlockOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [photosByPhase, setPhotosByPhase] = useState<Record<string, boolean>>({});
+  const [alertError, setAlertError] = useState<string | null>(null);
   const [contactCard, setContactCard] = useState<{ name: string; address: string }>({
     name: '',
     address: '',
@@ -50,7 +51,12 @@ export default function ProductionJob() {
       });
   }, [job]);
 
-  useEffect(() => { if (job) void checkBlockNotification(); }, [job, checkBlockNotification]);
+  useEffect(() => {
+    if (!job) return;
+    checkBlockNotification()
+      .then(() => setAlertError(null))
+      .catch((err: unknown) => setAlertError(err instanceof Error ? err.message : 'Owner alert failed'));
+  }, [job, checkBlockNotification]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -85,6 +91,11 @@ export default function ProductionJob() {
       >🚩 Flag Issue</button>
 
       <main className="p-3 space-y-3">
+        {alertError && (
+          <div className="border border-rose-300 bg-rose-50 text-rose-800 text-sm rounded-lg p-3">
+            Owner text alert did not send ({alertError}). Call Todd.
+          </div>
+        )}
         <OpenIssuesPanel jobId={jobId} />
         {CHECKLIST_TEMPLATE.map((sec) => (
           <ChecklistSection
@@ -126,7 +137,6 @@ export default function ProductionJob() {
         <FlagIssueModal
           jobId={jobId}
           contactId={job.contact_id}
-          jobNumber={job.job_number}
           section={issueSection}
           onClose={() => setIssueOpen(false)}
         />

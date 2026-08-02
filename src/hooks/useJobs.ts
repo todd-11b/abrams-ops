@@ -1,6 +1,7 @@
 // src/hooks/useJobs.ts
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { subscribeToRefresh } from '../lib/dataRefresh';
 import type { Job } from '../types/production';
 
 export function useJobs() {
@@ -28,11 +29,7 @@ export function useJobs() {
 
   useEffect(() => {
     load();
-    const channel = supabase
-      .channel('jobs-list')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs' }, load)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return subscribeToRefresh('jobs', load);
   }, [load]);
 
   return { jobs, loading, error, reload: load };

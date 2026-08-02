@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { signInWithPin, getStoredActor, getOperatorSession, clearStoredActor } from './actor';
+import { signInWithPin, getStoredActor, getOperatorSession, clearStoredActor, onOperatorSessionEnded, operatorFetch } from './actor';
 
 describe('server-backed operator session', () => {
   beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
@@ -23,5 +23,20 @@ describe('server-backed operator session', () => {
     sessionStorage.setItem('abrams_operator_session', JSON.stringify({ token: 'x', actor: 'ty', expiresAt: Math.floor(Date.now()/1000)+60 }));
     clearStoredActor();
     expect(getStoredActor()).toBeNull();
+  });
+
+  it('notifies subscribers when an expired session is rejected mid-session', async () => {
+    const ended = vi.fn();
+    const unsubscribe = onOperatorSessionEnded(ended);
+    sessionStorage.setItem('abrams_operator_session', JSON.stringify({ token: 'x', actor: 'ty', expiresAt: Math.floor(Date.now()/1000)+60 }));
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
+
+    await operatorFetch('/api/operator/data', { method: 'POST' });
+
+    expect(ended).toHaveBeenCalledTimes(1);
+    expect(getStoredActor()).toBeNull();
+    unsubscribe();
+    clearStoredActor();
+    expect(ended).toHaveBeenCalledTimes(1);
   });
 });

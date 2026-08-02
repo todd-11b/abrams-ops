@@ -31,6 +31,8 @@ import {
 
 type AppStep = "consult" | "proposal" | "signpay";
 
+const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
+
 const defaultForm = (): ConsultFormData => ({
   contactId: "",
   contactName: "",
@@ -118,7 +120,12 @@ export const ConsultApp = () => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<any[]>([]);
-  const [proposalToken, setProposalToken] = useState('');
+  const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
+
+  // A token authorises one contact/opportunity pair, so it is only reusable
+  // while that pair is unchanged.
+  const tokenKey = `${form.contactId}|${form.opportunityId}`;
+  const proposalToken = issuedToken?.key === tokenKey ? issuedToken.token : '';
 
   const issueProposalToken = async (): Promise<string> => {
     if (proposalToken) return proposalToken;
@@ -131,7 +138,7 @@ export const ConsultApp = () => {
     });
     if (!response.ok) throw new Error('Could not issue a protected proposal link.');
     const body = await response.json() as { token: string };
-    setProposalToken(body.token);
+    setIssuedToken({ key: tokenKey, token: body.token });
     return body.token;
   };
 
@@ -390,8 +397,23 @@ export const ConsultApp = () => {
         }
       }
 
-      if (markComplete && form.opportunityId) {
-        await crmApi.updateOpportunityStatus(form.opportunityId, "On-Site Consultation Completed");
+      // Every proposal has to hang off a pipeline opportunity, and nothing else
+      // creates one, so the first CRM save opens it.
+      let opportunityId = form.opportunityId;
+      if (realContactId && !opportunityId) {
+        const created = await crmApi.createOpportunity({
+          contactId: realContactId,
+          pipelineId: SALES_PIPELINE_ID,
+          name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
+          monetaryValue: totals.grandTotal,
+        });
+        opportunityId = created.opportunity?.id ?? "";
+        if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
+        updateForm({ opportunityId });
+      }
+
+      if (markComplete && opportunityId) {
+        await crmApi.updateOpportunityStatus(opportunityId, "On-Site Consultation Completed");
       }
 
       setSaveStatus("success");
@@ -621,7 +643,7 @@ export const ConsultApp = () => {
       if (form.opportunityId) {
         // Find the stage ID for "Proposal Sent" by calling getPipelines in the background
         crmApi.getPipelines().then(res => {
-          const pipeline = res.pipelines?.find((p: any) => p.id === "afca3dmAyyMoiEbF5Hvy");
+          const pipeline = res.pipelines?.find((p: any) => p.id === SALES_PIPELINE_ID);
           const stage = pipeline?.stages?.find((s: any) => s.name === "Proposal Sent");
           if (stage) {
             crmApi.updateOpportunityStatus(form.opportunityId, "open", stage.id);

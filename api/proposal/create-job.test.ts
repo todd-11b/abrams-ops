@@ -99,6 +99,32 @@ describe('atomic proposal signing', () => {
     const res = await handler(request({ token })); expect(res.status).toBe(202); expect((await res.json()).mirror_status).toBe('partial_failure');
   });
 
+  it('ignores browser-supplied pricing and takes the deposit from the token snapshot', async () => {
+    const bodies: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); bodies.push({ url, body: String(init?.body ?? '') });
+      if (url.includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
+      if (url.includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 12000 } }]), { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const res = await handler(request({ token, proposal_display_id: 'P-9', deposit_due: 6, fence_spec: { proposal_total: 12 } }));
+
+    expect(res.status).toBe(201);
+    expect(JSON.parse(bodies[0].body)).toEqual({ p_token_hash: expect.any(String), p_fence_spec: null });
+    const note = bodies.find((call) => call.url.includes('/notes'));
+    expect(JSON.parse(String(note?.body)).body).toContain('Deposit due: $6,000');
+  });
+
+  it('reports a skipped mirror when there is nothing to mirror', async () => {
+    process.env.GHL_API_KEY = '';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/rpc/')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
+      return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'o1', fence_spec: null }]), { status: 200 });
+    }));
+    expect((await (await handler(request({ token }))).json()).mirror_status).toBe('skipped');
+  });
+
   it('does not report success when the transaction fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('database error', { status: 500 })));
     expect((await handler(request({ token }))).status).toBe(502);

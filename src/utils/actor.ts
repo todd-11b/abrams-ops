@@ -4,6 +4,14 @@ const SESSION_KEY = 'abrams_operator_session';
 
 interface StoredSession { token: string; actor: Actor; expiresAt: number }
 
+const sessionEndListeners = new Set<() => void>();
+
+/** Lets a mounted PIN gate re-lock the moment a session expires or is rejected. */
+export function onOperatorSessionEnded(listener: () => void): () => void {
+  sessionEndListeners.add(listener);
+  return () => { sessionEndListeners.delete(listener); };
+}
+
 export function storeOperatorSession(session: StoredSession): void {
   sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
 }
@@ -33,7 +41,11 @@ export async function signInWithPin(pin: string): Promise<Actor> {
   return body.actor;
 }
 
-export function clearStoredActor(): void { sessionStorage.removeItem(SESSION_KEY); }
+export function clearStoredActor(): void {
+  const hadSession = sessionStorage.getItem(SESSION_KEY) !== null;
+  sessionStorage.removeItem(SESSION_KEY);
+  if (hadSession) for (const listener of [...sessionEndListeners]) listener();
+}
 
 export async function operatorFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const session = getOperatorSession();

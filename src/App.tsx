@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, Outlet } from 'react-router-dom';
 import ConsultPage from './pages/consult/ConsultPage';
 import ProposalPage from './pages/proposal/ProposalPage';
 import ProductionDashboard from './pages/production/ProductionDashboard';
 import ProductionJob from './pages/production/ProductionJob';
 import { ProductionPinGate } from './components/production/PinGate';
-import { getStoredActor } from './utils/actor';
+import { getStoredActor, onOperatorSessionEnded } from './utils/actor';
 
 function ProductionShell() {
   const [unlocked, setUnlocked] = useState(() => Boolean(getStoredActor()));
+  useEffect(() => onOperatorSessionEnded(() => setUnlocked(false)), []);
   if (!unlocked) return <ProductionPinGate onUnlock={() => setUnlocked(true)} />;
   return <Outlet />;
 }

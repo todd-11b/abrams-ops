@@ -34,6 +34,15 @@ export default async function handler(req: Request) {
     case 'updateContact': { const update = onlyKeys(body.payload, ['address1','customFields']); if (!contactId || !update || (update.customFields !== undefined && !Array.isArray(update.customFields))) break; path = `/contacts/${contactId}`; method = 'PUT'; payload = update; break; }
     case 'addNote': if (!contactId || typeof body.body !== 'string' || body.body.length > 5000) break; path = `/contacts/${contactId}/notes`; method = 'POST'; payload = { body: body.body }; break;
     case 'addTags': if (!contactId || !Array.isArray(body.tags) || body.tags.length > 20 || body.tags.some((tag: unknown) => typeof tag !== 'string' || tag.length > 100)) break; path = `/contacts/${contactId}/tags`; method = 'POST'; payload = { tags: body.tags }; break;
+    case 'createOpportunity': {
+      const pipelineId = id(body.pipelineId); const name = typeof body.name === 'string' ? body.name.trim() : '';
+      const monetaryValue = body.monetaryValue;
+      if (!contactId || !pipelineId || !name || name.length > 200) break;
+      if (monetaryValue !== undefined && (typeof monetaryValue !== 'number' || !Number.isFinite(monetaryValue) || monetaryValue < 0)) break;
+      path = '/opportunities/'; method = 'POST';
+      payload = { pipelineId, locationId, contactId, name, status: 'open', ...(monetaryValue === undefined ? {} : { monetaryValue }) };
+      break;
+    }
     case 'getPipelines': path = `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`; break;
     case 'updateOpportunityStatus': if (!opportunityId || typeof body.status !== 'string' || (body.pipelineStageId && !id(body.pipelineStageId))) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status, ...(body.pipelineStageId ? { pipelineStageId: body.pipelineStageId } : {}) }; break;
     case 'moveOpportunityToStage': if (!opportunityId || !id(body.pipelineStageId)) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { pipelineStageId: body.pipelineStageId }; break;
