@@ -647,10 +647,21 @@ export const ConsultApp = () => {
 
     try {
       const today = new Date().toISOString().split("T")[0];
+      // The customer must receive a link for the quote as it stands now: a
+      // token issued before a re-price is refused by the signing page.
+      await crmApi.updateContact(form.contactId, {
+        customFields: [
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(form) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(form) },
+        ]
+      });
+      const token = await issueProposalToken();
+      const proposalLink = `${window.location.origin}/proposal/${token}`;
       await crmApi.updateContact(form.contactId, {
         customFields: [
           { id: "kWMi7fpdhv9RyPowuU1R", key: "contact.proposal_status", value: "Sent" },
-          { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: today }
+          { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: today },
+          { key: "contact.proposal_link", value: proposalLink }
         ]
       });
 
@@ -669,6 +680,7 @@ export const ConsultApp = () => {
         ...prev,
         proposalStatus: "Sent",
         proposalSentDate: today,
+        proposalLink,
       }));
 
       setSaveStatus("success");
@@ -676,7 +688,7 @@ export const ConsultApp = () => {
     } catch (error) {
       console.error("Failed to mark proposal as sent:", error);
       setSaveStatus("error");
-      setSaveMessage("Failed to update CRM.");
+      setSaveMessage(error instanceof Error ? error.message : "Failed to update CRM.");
       throw error;
     }
   };
