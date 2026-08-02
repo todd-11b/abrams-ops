@@ -1,4 +1,5 @@
 import { canOperator, requireOperator, secureJson } from '../_lib/operator-auth';
+import { deriveFenceSpec, fetchGhlContact, readStoredProposal } from '../_lib/proposal-source';
 import { sha256, supabaseRequest } from '../_lib/server-data';
 
 export const config = { runtime: 'edge' };
@@ -13,9 +14,17 @@ export default async function handler(req: Request) {
   if (!body.contact_id || !body.proposal_id) return secureJson({ error: 'contact_id and proposal_id required' }, { status: 400 });
   const ttl = Math.min(Math.max(body.ttl_hours ?? 168, 1), 720);
   const raw = Array.from(crypto.getRandomValues(new Uint8Array(32)), (b) => b.toString(16).padStart(2, '0')).join('');
+  // The token carries the only pricing the signed job will ever see, so a link
+  // that cannot be priced must not be handed out.
+  const apiKey = process.env.GHL_API_KEY ?? '';
+  if (!apiKey) return secureJson({ error: 'CRM not configured' }, { status: 500 });
+  const { status, contact } = await fetchGhlContact(body.contact_id, apiKey);
+  if (!contact) return secureJson({ error: 'could not read the saved proposal from the CRM' }, { status: status === 404 ? 404 : 502 });
+  const fenceSpec = deriveFenceSpec(readStoredProposal(contact));
+  if (!fenceSpec) return secureJson({ error: 'save the proposal before issuing a link' }, { status: 409 });
   const db = await supabaseRequest('proposal_access_tokens', {
     method: 'POST',
-    body: JSON.stringify({ token_hash: await sha256(raw), contact_id: body.contact_id, proposal_id: body.proposal_id, purpose: 'proposal_view_sign', expires_at: new Date(Date.now() + ttl * 3600000).toISOString(), created_by: operator.sub }),
+    body: JSON.stringify({ token_hash: await sha256(raw), contact_id: body.contact_id, proposal_id: body.proposal_id, purpose: 'proposal_view_sign', fence_spec: fenceSpec, expires_at: new Date(Date.now() + ttl * 3600000).toISOString(), created_by: operator.sub }),
   });
   if (!db.ok) return secureJson({ error: 'proposal token issuance failed' }, { status: 502 });
   return secureJson({ token: raw, expires_at: new Date(Date.now() + ttl * 3600000).toISOString() }, { status: 201 });

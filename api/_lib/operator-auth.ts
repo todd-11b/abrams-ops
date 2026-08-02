@@ -23,11 +23,17 @@ export type OperatorPermission =
 
 const ROLE_PERMISSIONS: Record<OperatorClaims['role'], ReadonlySet<OperatorPermission>> = {
   owner: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'ghl:standard', 'ghl:broad-read', 'ghl:send-message']),
-  field: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'ghl:standard']),
+  field: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'ghl:standard', 'ghl:broad-read']),
 };
 
 export function canOperator(claims: OperatorClaims, permission: OperatorPermission): boolean {
   return ROLE_PERMISSIONS[claims.role].has(permission);
+}
+
+/** Defaults to 1 for an unset, empty or non-numeric value, per the documented contract. */
+export function operatorSessionVersion(): number {
+  const configured = Number(process.env.OPERATOR_SESSION_VERSION?.trim() || '1');
+  return Number.isFinite(configured) ? configured : 1;
 }
 
 function b64url(input: Uint8Array | string): string {
@@ -64,7 +70,7 @@ export async function issueOperatorToken(
     iat: now,
     exp: now + 8 * 60 * 60,
     jti: crypto.randomUUID(),
-    version: Number(process.env.OPERATOR_SESSION_VERSION ?? '1'),
+    version: operatorSessionVersion(),
   };
   const encoded = `${b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))}.${b64url(JSON.stringify(claims))}`;
   return { token: `${encoded}.${await signature(secret, encoded)}`, claims };
@@ -85,7 +91,7 @@ export async function verifyOperatorToken(token: string, now = Math.floor(Date.n
   try {
     const claims = JSON.parse(decode(parts[1])) as OperatorClaims;
     if (claims.aud !== AUDIENCE || claims.location !== location || claims.exp <= now || claims.iat > now + 60) return null;
-    if (claims.version !== Number(process.env.OPERATOR_SESSION_VERSION ?? '1')) return null;
+    if (claims.version !== operatorSessionVersion()) return null;
     if (!['todd', 'ty'].includes(claims.sub) || !['pin', 'ghl'].includes(claims.provider)) return null;
     return claims;
   } catch {

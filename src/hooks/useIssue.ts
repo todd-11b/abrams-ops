@@ -1,8 +1,9 @@
 // src/hooks/useIssue.ts
 import { useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { notifyRefresh } from '../lib/dataRefresh';
 import { useActivityLog } from './useActivityLog';
-import { sendHighSeverityIssueSms } from '../utils/ghlSync';
+import { sendOwnerAlert } from '../utils/ghlSync';
 import { getStoredActor } from '../utils/actor';
 import type {
   IssueType,
@@ -19,13 +20,18 @@ interface CreateIssueInput {
   note: string;
   photos: string[];
   section: ChecklistSectionKey | null;
-  jobNumber: string;
+}
+
+export interface CreateIssueResult {
+  issue: JobIssue;
+  /** Set when the issue was recorded but the owner alert could not be delivered. */
+  alertError: string | null;
 }
 
 export function useIssue() {
   const { append } = useActivityLog();
 
-  const create = useCallback(async (input: CreateIssueInput) => {
+  const create = useCallback(async (input: CreateIssueInput): Promise<CreateIssueResult> => {
     let severity = input.severity;
     let customer_visible = false;
     if (input.type === 'customer_concern') {
@@ -58,15 +64,17 @@ export function useIssue() {
       type: 'issue_flagged',
       payload: { issue_id: (data as JobIssue).issue_id, type: input.type, severity, section: input.section },
     });
+    const issue = data as JobIssue;
+    let alertError: string | null = null;
     if (severity === 'high') {
-      await sendHighSeverityIssueSms({
-        jobNumber: input.jobNumber,
-        contactId: input.contact_id,
-        issueType: input.type,
-        jobId: input.job_id,
-      });
+      try {
+        await sendOwnerAlert({ kind: 'issue_high', jobId: input.job_id, issueId: issue.issue_id });
+      } catch (err) {
+        alertError = err instanceof Error ? err.message : 'Owner alert failed';
+      }
     }
-    return data as JobIssue;
+    notifyRefresh('job_issues');
+    return { issue, alertError };
   }, [append]);
 
   const resolve = useCallback(async (issueId: string, resolutionNote: string) => {
@@ -80,6 +88,7 @@ export function useIssue() {
       .eq('issue_id', issueId);
     if (error) throw error;
     await append({ type: 'issue_resolved', payload: { issue_id: issueId } });
+    notifyRefresh('job_issues');
   }, [append]);
 
   return { create, resolve };

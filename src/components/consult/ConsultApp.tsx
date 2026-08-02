@@ -31,6 +31,8 @@ import {
 
 type AppStep = "consult" | "proposal" | "signpay";
 
+const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
+
 const defaultForm = (): ConsultFormData => ({
   contactId: "",
   contactName: "",
@@ -106,6 +108,7 @@ export const ConsultApp = () => {
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [contactsError, setContactsError] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
@@ -118,7 +121,12 @@ export const ConsultApp = () => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<any[]>([]);
-  const [proposalToken, setProposalToken] = useState('');
+  const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
+
+  // A token authorises one contact/opportunity pair and freezes the price the
+  // customer signs, so it is only reusable while both are unchanged.
+  const tokenKey = JSON.stringify([form.contactId, form.opportunityId, form.fenceLines, form.gates, form.gateInstances, form.addOns]);
+  const proposalToken = issuedToken?.key === tokenKey ? issuedToken.token : '';
 
   const issueProposalToken = async (): Promise<string> => {
     if (proposalToken) return proposalToken;
@@ -129,9 +137,12 @@ export const ConsultApp = () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contact_id: form.contactId, proposal_id: form.opportunityId }),
     });
-    if (!response.ok) throw new Error('Could not issue a protected proposal link.');
+    if (!response.ok) {
+      const reason = await response.json().then((b) => b?.error).catch(() => null);
+      throw new Error(reason ? `Could not issue a protected proposal link: ${reason}.` : 'Could not issue a protected proposal link.');
+    }
     const body = await response.json() as { token: string };
-    setProposalToken(body.token);
+    setIssuedToken({ key: tokenKey, token: body.token });
     return body.token;
   };
 
@@ -156,9 +167,11 @@ export const ConsultApp = () => {
           opportunityId: "",
         }));
         setContacts(list);
+        setContactsError("");
       } catch (err) {
         console.error("Fetch contacts failed", err);
         setContacts([]);
+        setContactsError(err instanceof Error ? err.message : "Could not reach the CRM.");
       } finally {
         setLoadingContacts(false);
       }
@@ -353,6 +366,33 @@ export const ConsultApp = () => {
         await crmApi.updateContact(realContactId, { address1: form.propertyAddress });
       }
 
+      // Every proposal has to hang off a pipeline opportunity, and nothing else
+      // creates one, so the first CRM save opens it. It is created before the
+      // quote is serialised so the id is saved with it and reused next time.
+      let opportunityId = form.opportunityId;
+      if (realContactId && !opportunityId) {
+        const created = await crmApi.createOpportunity({
+          contactId: realContactId,
+          pipelineId: SALES_PIPELINE_ID,
+          name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
+          monetaryValue: totals.grandTotal,
+        });
+        opportunityId = created.opportunity?.id ?? "";
+        if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
+        updateForm({ opportunityId });
+      } else if (realContactId && opportunityId) {
+        // The value is only set at creation, so a re-priced quote would leave
+        // the pipeline reporting the original amount.
+        await crmApi.updateOpportunityValue(opportunityId, totals.grandTotal);
+      }
+
+      // The draft written above predates the opportunity, so re-persist it with
+      // the id — otherwise reopening the customer opens a second opportunity.
+      const savedForm = { ...form, contactId: currentContactId || "", opportunityId };
+      const draft = drafts[currentContactId || ""];
+      if (draft) draft.form = savedForm;
+      localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
+
       if (realContactId) {
         const customFields = [
           { id: "rOo4tVW8Vr1YDqbKx16s", key: "contact.hoa_approval_needed", value: form.hoaApproval },
@@ -370,8 +410,8 @@ export const ConsultApp = () => {
           { id: "4sYTsRc8X1b2RgYyTYxi", key: "contact.customer_sell_price", value: totals.grandTotal },
           { id: "1aehlMpse8vflbYq2IsW", key: "contact.consultant_notes", value: form.consultantNotes },
           { id: "zDkeO0JsdPV5lc0D4Cwp", key: "contact.consultation_completed_date", value: new Date().toISOString().split('T')[0] },
-          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(form) },
-          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(form) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(savedForm) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(savedForm) },
           { id: "12YSsRRAQStXYEIGVmea", key: "contact.proposal_id", value: form.proposalId },
           { id: "kWMi7fpdhv9RyPowuU1R", key: "contact.proposal_status", value: form.proposalStatus },
           { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: form.proposalSentDate || new Date().toISOString().split('T')[0] },
@@ -390,8 +430,8 @@ export const ConsultApp = () => {
         }
       }
 
-      if (markComplete && form.opportunityId) {
-        await crmApi.updateOpportunityStatus(form.opportunityId, "On-Site Consultation Completed");
+      if (markComplete && opportunityId) {
+        await crmApi.updateOpportunityStatus(opportunityId, "On-Site Consultation Completed");
       }
 
       setSaveStatus("success");
@@ -611,17 +651,28 @@ export const ConsultApp = () => {
 
     try {
       const today = new Date().toISOString().split("T")[0];
+      // The customer must receive a link for the quote as it stands now: a
+      // token issued before a re-price is refused by the signing page.
+      await crmApi.updateContact(form.contactId, {
+        customFields: [
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(form) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(form) },
+        ]
+      });
+      const token = await issueProposalToken();
+      const proposalLink = `${window.location.origin}/proposal/${token}`;
       await crmApi.updateContact(form.contactId, {
         customFields: [
           { id: "kWMi7fpdhv9RyPowuU1R", key: "contact.proposal_status", value: "Sent" },
-          { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: today }
+          { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: today },
+          { key: "contact.proposal_link", value: proposalLink }
         ]
       });
 
       if (form.opportunityId) {
         // Find the stage ID for "Proposal Sent" by calling getPipelines in the background
         crmApi.getPipelines().then(res => {
-          const pipeline = res.pipelines?.find((p: any) => p.id === "afca3dmAyyMoiEbF5Hvy");
+          const pipeline = res.pipelines?.find((p: any) => p.id === SALES_PIPELINE_ID);
           const stage = pipeline?.stages?.find((s: any) => s.name === "Proposal Sent");
           if (stage) {
             crmApi.updateOpportunityStatus(form.opportunityId, "open", stage.id);
@@ -633,6 +684,7 @@ export const ConsultApp = () => {
         ...prev,
         proposalStatus: "Sent",
         proposalSentDate: today,
+        proposalLink,
       }));
 
       setSaveStatus("success");
@@ -640,7 +692,7 @@ export const ConsultApp = () => {
     } catch (error) {
       console.error("Failed to mark proposal as sent:", error);
       setSaveStatus("error");
-      setSaveMessage("Failed to update CRM.");
+      setSaveMessage(error instanceof Error ? error.message : "Failed to update CRM.");
       throw error;
     }
   };
@@ -653,7 +705,8 @@ export const ConsultApp = () => {
         form={form}
         totals={calcTotals(form)}
         onBack={() => setStep("consult")}
-        onPresent={async () => { try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
+        onPresent={async () => { setSaveStatus('idle'); setSaveMessage(''); try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
+        errorMessage={saveStatus === 'error' ? saveMessage : ''}
         onSendForReview={() => handleSendForReview(false)}
         onRegenerateInvoice={() => handleSendForReview(true)}
         onSendToCustomer={handleSendToCustomer}
@@ -784,7 +837,11 @@ export const ConsultApp = () => {
                   ))}
                   {contacts.length === 0 && !searching && (
                     <div className="text-center py-10 bg-white rounded-2xl border border-gray-200">
-                      <p className="text-gray-500 text-sm">No customers found.</p>
+                      {contactsError ? (
+                        <p className="text-red-500 text-sm px-4">Could not load customers: {contactsError}</p>
+                      ) : (
+                        <p className="text-gray-500 text-sm">No customers found.</p>
+                      )}
                     </div>
                   )}
                 </div>

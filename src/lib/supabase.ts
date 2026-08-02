@@ -27,8 +27,6 @@ class Query implements PromiseLike<Result> {
 
 export const supabase = {
   from: (table: string) => new Query(table),
-  channel: (..._args: unknown[]) => ({ on(..._onArgs: unknown[]) { return this; }, subscribe(..._subscribeArgs: unknown[]) { return this; } }),
-  removeChannel: (..._args: unknown[]) => undefined,
   storage: { from: (_bucket: string) => ({
     async upload(path: string, file: File, _options?: unknown) { const fd = new FormData(); fd.append('path', path); fd.append('file', file); const res = await operatorFetch('/api/operator/photos', { method: 'POST', body: fd }); const body = await res.json().catch(() => ({})); return res.ok ? { data: body, error: null } : { data: null, error: { message: body.error ?? 'upload failed' } }; },
     getPublicUrl(path: string) { return { data: { publicUrl: `/storage/v1/object/job-photos/${path}` } }; },

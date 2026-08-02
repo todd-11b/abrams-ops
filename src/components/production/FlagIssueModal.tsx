@@ -6,7 +6,6 @@ import type { IssueType, IssueSeverity, ChecklistSectionKey } from '../../types/
 interface Props {
   jobId: string;
   contactId: string;
-  jobNumber: string;
   section: ChecklistSectionKey | null;
   onClose: () => void;
 }
@@ -22,7 +21,7 @@ const TYPES: { value: IssueType; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
-export function FlagIssueModal({ jobId, contactId, jobNumber, section, onClose }: Props) {
+export function FlagIssueModal({ jobId, contactId, section, onClose }: Props) {
   const { create } = useIssue();
   const [type, setType] = useState<IssueType>('other');
   const [severity, setSeverity] = useState<IssueSeverity>('low');
@@ -30,16 +29,20 @@ export function FlagIssueModal({ jobId, contactId, jobNumber, section, onClose }
   const [photos, setPhotos] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [alertError, setAlertError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
     setError(null);
     setSubmitting(true);
     try {
-      await create({ job_id: jobId, contact_id: contactId, type, severity, note, photos, section, jobNumber });
+      const result = await create({ job_id: jobId, contact_id: contactId, type, severity, note, photos, section });
+      setAlertError(result.alertError);
       setSaved(true);
       // Hold the success flash long enough to register, then close and scroll
       // to the top so the new entry in the Open Issues panel is in view.
+      // An undelivered owner alert has to be read, so that flash waits for a tap.
+      if (result.alertError) return;
       setTimeout(() => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
         onClose();
@@ -57,6 +60,14 @@ export function FlagIssueModal({ jobId, contactId, jobNumber, section, onClose }
           <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-2xl">✅</div>
           <div className="font-semibold text-emerald-700">Issue flagged</div>
           <div className="text-xs text-slate-500">Logged at {new Date().toLocaleTimeString()}</div>
+          {alertError && (
+            <>
+              <div className="text-sm text-rose-700 text-center">
+                Owner text alert did not send ({alertError}). Call Todd.
+              </div>
+              <button onClick={onClose} className="px-4 py-2 border rounded-lg text-sm">Close</button>
+            </>
+          )}
         </div>
       </div>
     );

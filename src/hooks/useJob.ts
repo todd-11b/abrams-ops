@@ -1,12 +1,13 @@
 // src/hooks/useJob.ts
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { notifyRefresh, subscribeToRefresh } from '../lib/dataRefresh';
 import { useActivityLog } from './useActivityLog';
 import {
   syncStageScheduled,
   syncStageInInstall,
   syncStageJobComplete,
-  sendBlockSms,
+  sendOwnerAlert,
 } from '../utils/ghlSync';
 import { shouldFireBlockNotification } from '../utils/notificationThrottle';
 import type { Job, JobFenceSpec, JobStage, JobStatus } from '../types/production';
@@ -35,11 +36,7 @@ export function useJob(jobId: string | undefined) {
   useEffect(() => {
     load();
     if (!jobId) return;
-    const channel = supabase
-      .channel(`job-${jobId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'jobs', filter: `job_id=eq.${jobId}` }, load)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return subscribeToRefresh('jobs', load);
   }, [jobId, load]);
 
   const setStage = useCallback(async (stage: JobStage) => {
@@ -53,6 +50,7 @@ export function useJob(jobId: string | undefined) {
     if (stage === 'scheduled') await syncStageScheduled(job);
     if (stage === 'in_install') await syncStageInInstall(job);
     if (stage === 'job_complete') await syncStageJobComplete(job);
+    notifyRefresh('jobs');
   }, [job, append]);
 
   const block = useCallback(async (reason: string, note: string) => {
@@ -70,6 +68,7 @@ export function useJob(jobId: string | undefined) {
       .eq('job_id', job.job_id);
     if (error) throw error;
     await append({ job_id: job.job_id, contact_id: job.contact_id, type: 'job_blocked', payload: { reason, note } });
+    notifyRefresh('jobs');
   }, [job, append]);
 
   const unblock = useCallback(async () => {
@@ -80,17 +79,13 @@ export function useJob(jobId: string | undefined) {
       .eq('job_id', job.job_id);
     if (error) throw error;
     await append({ job_id: job.job_id, contact_id: job.contact_id, type: 'job_unblocked' });
+    notifyRefresh('jobs');
   }, [job, append]);
 
   const checkBlockNotification = useCallback(async () => {
     if (!job || job.status !== 'blocked') return;
     if (!shouldFireBlockNotification(job.blocked_at, job.last_blocked_notification_at)) return;
-    await sendBlockSms({
-      jobNumber: job.job_number,
-      contactId: job.contact_id,
-      reason: job.blocked_reason ?? 'unspecified',
-      jobId: job.job_id,
-    });
+    await sendOwnerAlert({ kind: 'job_blocked', jobId: job.job_id });
     await supabase
       .from('jobs')
       .update({ last_blocked_notification_at: new Date().toISOString() })

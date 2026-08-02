@@ -94,7 +94,7 @@ describe('SignPayView (signature-only)', () => {
       );
     });
     const request = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/proposal/create-job'))?.[1] as RequestInit | undefined;
-    expect(JSON.parse(String(request?.body))).toMatchObject({ token: 'a'.repeat(64) });
+    expect(JSON.parse(String(request?.body))).toEqual({ token: 'a'.repeat(64), proposal_display_id: 'P-1' });
 
     await waitFor(() => {
       expect(screen.getByText(/proposal signed/i)).toBeTruthy();

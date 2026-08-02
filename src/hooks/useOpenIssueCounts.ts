@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { subscribeToRefresh } from '../lib/dataRefresh';
 
 export function useOpenIssueCounts() {
   const [countsByJob, setCountsByJob] = useState<Record<string, number>>({});
@@ -23,11 +24,7 @@ export function useOpenIssueCounts() {
 
   useEffect(() => {
     load();
-    const channel = supabase
-      .channel('issue-counts')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_issues' }, load)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return subscribeToRefresh('job_issues', load);
   }, [load]);
 
   return { countsByJob, reload: load };

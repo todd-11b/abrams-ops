@@ -30,33 +30,22 @@ export const SignPayView = ({ form, onBack, proposalId, proposalToken }: Props) 
     setError(null);
 
     try {
-      const totalLf = form.fenceLines.reduce((sum, l) => sum + (l.linearFeet || 0), 0);
+      // The job's fence specification and payable amounts are read from the
+      // saved proposal server-side; this page only identifies the proposal.
       const resp = await fetch('/api/proposal/create-job', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: proposalToken,
-          proposal_display_id: proposalId,
-          deposit_due: totals.deposit,
-          fence_spec: {
-            fence_lines: form.fenceLines,
-            gates: form.gateInstances,
-            addons: [
-              ...(form.addOns.demo.enabled ? [{ type: 'demo', ...form.addOns.demo }] : []),
-              ...(form.addOns.stain.enabled ? [{ type: 'stain', ...form.addOns.stain }] : []),
-              ...(form.addOns.poolLatch.enabled ? [{ type: 'poolLatch', ...form.addOns.poolLatch }] : []),
-            ],
-            total_sections: totals.totalSections,
-            total_lf: totalLf,
-            proposal_total: totals.grandTotal,
-          },
-        }),
+        body: JSON.stringify({ token: proposalToken, proposal_display_id: proposalId }),
       });
 
       if (!resp.ok) {
         const t = await resp.text().catch(() => '');
         console.error('[SignPayView] create-job failed:', resp.status, t);
-        setError("We couldn't record your signature. Please try again or call us.");
+        let reason: string | null = null;
+        if (resp.status === 409) {
+          try { reason = (JSON.parse(t) as { error?: string })?.error ?? null; } catch { reason = null; }
+        }
+        setError(reason || "We couldn't record your signature. Please try again or call us.");
         return;
       }
 

@@ -1,5 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import proposalHandler from './[token]';
+import { deriveFenceSpec } from '../_lib/proposal-source';
+import type { ConsultFormData } from '../../src/components/consult/consultTypes';
+
+const storedProposal = {
+  proposalId: 'P-1',
+  contactId: 'c1',
+  fenceLines: [{ id: 'l1', style: 'wood_pine_6', linearFeet: 100, pricePerSection: 300 }],
+  gates: { walk: { qty: 0, price: 0 }, double: { qty: 0, price: 0 } },
+  gateInstances: [],
+  addOns: { demo: { enabled: false }, stain: { enabled: false }, poolLatch: { enabled: false } },
+} as unknown as ConsultFormData;
+const frozenSpec = deriveFenceSpec(storedProposal);
+const contactResponse = () => new Response(JSON.stringify({ contact: { firstName: 'Test', lastName: 'Customer', customFields: [{ id: 'v74WeVuNKTrjnYGM6ICN', value: JSON.stringify(storedProposal) }] } }), { status: 200 });
 
 const token = 'a'.repeat(64);
 const request = (value = token) => new Request(`http://test/api/proposal/${value}`);
@@ -26,10 +39,22 @@ describe('public proposal token boundary', () => {
 
   it('returns a valid proposal without disclosing contact or token identifiers and remains viewable after signing', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'p1', expires_at: '2999-01-01T00:00:00Z', consumed_at: new Date().toISOString() }]), { status: 200 });
-      return new Response(JSON.stringify({ contact: { firstName: 'Test', lastName: 'Customer', customFields: [{ id: 'v74WeVuNKTrjnYGM6ICN', value: JSON.stringify({ proposalId: 'P-1', contactId: 'c1' }) }] } }), { status: 200 });
+      if (String(input).includes('proposal_access_tokens')) return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'p1', expires_at: '2999-01-01T00:00:00Z', consumed_at: new Date().toISOString(), fence_spec: frozenSpec }]), { status: 200 });
+      return contactResponse();
     }));
     const response = await proposalHandler(request()); const body = await response.json();
     expect(response.status).toBe(200); expect(body.form.contactId).toBeUndefined(); expect(JSON.stringify(body)).not.toContain(token);
+  });
+
+  it('refuses to render a link issued against a superseded price', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('proposal_access_tokens')) {
+        return new Response(JSON.stringify([{ contact_id: 'c1', proposal_id: 'p1', expires_at: '2999-01-01T00:00:00Z', fence_spec: { ...frozenSpec, proposal_total: 1680, total_lf: 50 } }]), { status: 200 });
+      }
+      return contactResponse();
+    }));
+    const response = await proposalHandler(request());
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toMatch(/out of date/);
   });
 });

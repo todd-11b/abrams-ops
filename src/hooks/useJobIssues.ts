@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
+import { notifyRefresh, subscribeToRefresh } from '../lib/dataRefresh';
 import { useActivityLog } from './useActivityLog';
 import type { JobIssue } from '../types/production';
 
@@ -77,11 +78,7 @@ export function useJobIssues(jobId: string | undefined) {
   useEffect(() => {
     load();
     if (!jobId) return;
-    const channel = supabase
-      .channel(`issues-${jobId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'job_issues', filter: `job_id=eq.${jobId}` }, load)
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return subscribeToRefresh('job_issues', load);
   }, [jobId, load]);
 
   const resolve = useCallback(async (issueId: string, resolutionNote: string) => {
@@ -95,6 +92,7 @@ export function useJobIssues(jobId: string | undefined) {
       .eq('issue_id', issueId);
     if (error) throw error;
     await append({ job_id: jobId ?? null, type: 'issue_resolved', payload: { issue_id: issueId, resolution_note: resolutionNote } });
+    notifyRefresh('job_issues');
   }, [jobId, append]);
 
   const open = issues.filter((i) => !i.resolved);

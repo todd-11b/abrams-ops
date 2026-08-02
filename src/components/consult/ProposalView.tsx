@@ -14,6 +14,7 @@ interface Props {
   sending: boolean;
   sent: boolean;
   isPublic?: boolean;
+  errorMessage?: string;
 }
 
 
@@ -336,7 +337,7 @@ function ProposalDocument({ form, totals, internalView }: {
   );
 }
 
-export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview, onSendToCustomer, onAcceptProposal, sending, sent, isPublic = false }: Props) => {
+export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview, onSendToCustomer, onAcceptProposal, sending, sent, isPublic = false, errorMessage = "" }: Props) => {
 
   const [internalView, setInternalView] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -396,6 +397,13 @@ export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview,
           <div style={{ background: "#e0f2eb", borderRadius: 10, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ color: "#1d9e75", fontSize: 18 }}>✓</span>
             <p style={{ fontSize: 13, color: "#0f6e56", fontWeight: 600, margin: 0 }}>Proposal saved and ready to send.</p>
+          </div>
+        )}
+
+        {!isPublic && errorMessage && (
+          <div style={{ background: "#fdeaea", borderRadius: 10, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ color: "#c0392b", fontSize: 18 }}>!</span>
+            <p style={{ fontSize: 13, color: "#c0392b", fontWeight: 600, margin: 0 }}>{errorMessage}</p>
           </div>
         )}
 

@@ -12,6 +12,10 @@ const TABLES: Record<string, { read: string[]; write: string[]; filters: string[
   job_activity_log: { read: ['activity_id','job_id','contact_id','type','actor','source','payload','created_at'], write: ['job_id','contact_id','type','actor','source','payload'], filters: ['job_id'] },
 };
 
+function tableConfig(table: unknown) {
+  return typeof table === 'string' && Object.hasOwn(TABLES, table) ? TABLES[table] : null;
+}
+
 function allowedSelect(requested: unknown, columns: string[]): string | null {
   if (requested === undefined || requested === '*') return columns.join(',');
   if (typeof requested !== 'string') return null;
@@ -30,7 +34,7 @@ export default async function handler(req: Request) {
   if (!canOperator(operator, 'operator:data')) return secureJson({ error: 'forbidden' }, { status: 403 });
   if (req.method !== 'POST') return secureJson({ error: 'method not allowed' }, { status: 405 });
   let body: any; try { body = await req.json(); } catch { return secureJson({ error: 'invalid JSON' }, { status: 400 }); }
-  const config = TABLES[body.table];
+  const config = tableConfig(body.table);
   if (!config) return secureJson({ error: 'resource not allowed' }, { status: 400 });
   const operation = body.operation ?? 'select';
   if (!['select','insert','update'].includes(operation)) return secureJson({ error: 'operation not allowed' }, { status: 400 });
@@ -46,8 +50,12 @@ export default async function handler(req: Request) {
   if (operation === 'update' && (!body.filters?.length)) return secureJson({ error: 'update filter required' }, { status: 400 });
   let query = '';
   for (const filter of body.filters ?? []) {
-    if (!config.filters.includes(filter.column) || !['eq','is','in'].includes(filter.type)) return secureJson({ error: 'filter not allowed' }, { status: 400 });
-    const value = filter.type === 'in' ? `(${filter.value.map((v: unknown) => encodeURIComponent(String(v))).join(',')})` : encodeURIComponent(String(filter.value));
+    if (!filter || typeof filter !== 'object' || !config.filters.includes(filter.column) || !['eq','is','in'].includes(filter.type)) return secureJson({ error: 'filter not allowed' }, { status: 400 });
+    if (filter.type === 'in' && !Array.isArray(filter.value)) return secureJson({ error: 'filter not allowed' }, { status: 400 });
+    // encodeURIComponent leaves parentheses alone, and an unescaped one would
+    // close the `in` group early.
+    const member = (v: unknown) => encodeURIComponent(String(v)).replace(/\(/g, '%28').replace(/\)/g, '%29');
+    const value = filter.type === 'in' ? `(${filter.value.map(member).join(',')})` : member(filter.value);
     query += `${query ? '&' : ''}${filter.column}=${filter.type}.${value}`;
   }
   if (body.order) {

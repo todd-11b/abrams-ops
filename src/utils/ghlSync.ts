@@ -1,6 +1,7 @@
 // src/utils/ghlSync.ts
 import { crmApi } from '../lib/crm-api';
 import { productionEnv } from '../lib/env';
+import { operatorFetch } from './actor';
 import type { Job } from '../types/production';
 
 interface JobWithOpp { proposal_id: string | null; contact_id: string; }
@@ -31,61 +32,26 @@ export async function syncStageJobComplete(job: JobWithOpp) {
   await moveStage(job.proposal_id, productionEnv.stages.job_complete, 'syncStageJobComplete');
 }
 
-async function resolveContactCard(contactId: string): Promise<{ name: string; address: string }> {
-  try {
-    const resp = await crmApi.getContact(contactId);
-    const c = (resp as { contact?: { firstName?: string; lastName?: string; address1?: string } }).contact ?? {};
-    const name = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim() || '(no name)';
-    const address = c.address1 || '(no address)';
-    return { name, address };
-  } catch (err) {
-    console.error('[ghlSync] resolveContactCard failed:', err);
-    return { name: '(name unavailable)', address: '(address unavailable)' };
-  }
-}
+export type OwnerAlert =
+  | { kind: 'job_blocked'; jobId: string }
+  | { kind: 'issue_high'; jobId: string; issueId: string };
 
-export interface BlockSmsContext {
-  jobNumber: string;
-  contactId: string;
-  reason: string;
-  jobId: string;
-}
-
-export async function sendBlockSms(ctx: BlockSmsContext) {
-  const { name, address } = await resolveContactCard(ctx.contactId);
-  const body =
-    `🚨 ABRAMS ALERT\n` +
-    `Job: ${ctx.jobNumber} — ${name}\n` +
-    `Reason: ${ctx.reason}\n` +
-    `Address: ${address}\n` +
-    `Open: abramsfence.com/production/job/${ctx.jobId}`;
-  try {
-    await crmApi.sendSms(productionEnv.toddContactId, body);
-  } catch (err) {
-    console.error('[ghlSync] sendBlockSms failed:', err);
-  }
-}
-
-export interface IssueSmsContext {
-  jobNumber: string;
-  contactId: string;
-  issueType: string;
-  jobId: string;
-}
-
-export async function sendHighSeverityIssueSms(ctx: IssueSmsContext) {
-  const { name, address } = await resolveContactCard(ctx.contactId);
-  const body =
-    `🚨 ABRAMS ALERT\n` +
-    `Job: ${ctx.jobNumber} — ${name}\n` +
-    `Reason: ${ctx.issueType}\n` +
-    `Address: ${address}\n` +
-    `Open: abramsfence.com/production/job/${ctx.jobId}`;
-  try {
-    await crmApi.sendSms(productionEnv.toddContactId, body);
-  } catch (err) {
-    console.error('[ghlSync] sendHighSeverityIssueSms failed:', err);
-  }
+/**
+ * The server composes and sends the alert from stored job data, so delivery no
+ * longer depends on the signed-in operator's CRM messaging scope. Failures
+ * reject: callers surface them rather than dropping an owner alert.
+ */
+export async function sendOwnerAlert(alert: OwnerAlert): Promise<void> {
+  const response = await operatorFetch('/api/operator/alerts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: alert.kind,
+      job_id: alert.jobId,
+      ...(alert.kind === 'issue_high' ? { issue_id: alert.issueId } : {}),
+    }),
+  });
+  if (!response.ok) throw new Error(`Owner alert failed (${response.status})`);
 }
 
 export type { Job };
