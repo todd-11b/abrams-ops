@@ -1,7 +1,7 @@
 # Abrams Ops Source-Only Containment Design
 
-Version: 1.7  
-Date: 2026-08-01  
+Version: 1.8
+Date: 2026-08-02
 Status: source implementation in progress; Todd selected PIN now plus GHL identity later
 
 ## Authorized objective
@@ -212,3 +212,4 @@ The combined suite intentionally removes these 14 names from the Task 8 input. E
 - 2026-08-01 — v1.5: records the source-only Task 8 integration contract, reproducible 22-path environment-reference definition, combined verification suite, and unchanged staged activation order.
 - 2026-08-01 — v1.6: makes the five-step activation/rollback sequence authoritative, records the 14-row Task 8 assertion replacement map, and clarifies that additive prerequisites do not activate the new boundary.
 - 2026-08-01 — v1.7: replaces five source-only/partial Task 8 ledger claims with executable 405 and exact signing-time GHL request regression tests.
+- 2026-08-02 — v1.8: requires both server PINs to be present, distinct, and exactly four ASCII digits; makes invalid configuration fail closed before identity resolution; and requires every eventual PIN rotation to increment `OPERATOR_SESSION_VERSION` or rotate `OPERATOR_SESSION_SECRET` so existing sessions are immediately invalidated.

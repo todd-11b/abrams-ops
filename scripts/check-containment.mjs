@@ -45,6 +45,7 @@ if (actualNames.length !== expectedNames.length || expectedNames.some((name) => 
 }
 if (assignments.some((match) => match[2] !== '')) throw new Error('.env.example must not contain example values');
 if (obsoleteBrowser.some((name) => envExample.includes(name))) throw new Error('.env.example contains obsolete browser variables');
+if (!envExample.includes('must be distinct') || !envExample.includes('exactly four ASCII digits')) throw new Error('.env.example PIN contract is missing');
 if (!envExample.includes('Client-public routing (browser-exposed, required)') ||
     !envExample.includes('Server-only secrets (required; never browser-exposed)') ||
     !envExample.includes('Server-only configuration (required)') ||
@@ -61,6 +62,18 @@ if (formerContactIdentifier) {
   const identifier = Buffer.from(formerContactIdentifier);
   if (trackedPaths.some((file) => fs.readFileSync(file).includes(identifier))) {
     throw new Error('former GHL contact identifier remains in the tracked tree');
+  }
+}
+
+const historicalPins = [process.env.HISTORICAL_OPERATOR_PIN_1, process.env.HISTORICAL_OPERATOR_PIN_2].filter(Boolean);
+if (historicalPins.length > 0 && historicalPins.length !== 2) throw new Error('both historical PIN candidates are required for the transient scan');
+if (historicalPins.length === 2) {
+  const candidates = historicalPins.map((value) => Buffer.from(value));
+  const trackedPaths = execFileSync('git', ['ls-files', '-z']).toString().split('\0').filter(Boolean);
+  const buildPaths = fs.existsSync('dist') ? fs.readdirSync('dist', { recursive: true }).filter((path) => typeof path === 'string' && fs.statSync(`dist/${path}`).isFile()).map((path) => `dist/${path}`) : [];
+  for (const file of [...trackedPaths, ...buildPaths]) {
+    const content = fs.readFileSync(file);
+    if (candidates.some((candidate) => content.includes(candidate))) throw new Error('historical operator PIN remains in proposed source or build output');
   }
 }
 

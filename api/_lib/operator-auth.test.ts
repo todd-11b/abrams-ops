@@ -29,4 +29,14 @@ describe('operator bearer tokens', () => {
     expect(canOperator(field, 'ghl:send-message')).toBe(false);
     expect(canOperator(field, 'operator:data')).toBe(true);
   });
+  it('requires session-version or signing-secret rotation to revoke sessions after a PIN-only rotation', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin', 1000);
+    process.env.OPERATOR_TODD_PIN = '9753'; process.env.OPERATOR_TY_PIN = '8642';
+    expect(await verifyOperatorToken(token, 1001)).toMatchObject({ sub: 'todd' });
+    process.env.OPERATOR_SESSION_VERSION = '2';
+    expect(await verifyOperatorToken(token, 1001)).toBeNull();
+    process.env.OPERATOR_SESSION_VERSION = '1';
+    process.env.OPERATOR_SESSION_SECRET = 'different-test-secret-at-least-32-bytes';
+    expect(await verifyOperatorToken(token, 1001)).toBeNull();
+  });
 });

@@ -1,5 +1,6 @@
 import { issueOperatorToken, requireOperator, secureJson } from '../_lib/operator-auth';
 import { consumeLoginAttempt } from '../_lib/login-rate-limit';
+import { parseOperatorPinConfig, resolveOperatorFromPin } from '../_lib/operator-pin';
 
 export const config = { runtime: 'edge' };
 
@@ -11,18 +12,10 @@ export default async function handler(req: Request) {
   if (req.method !== 'POST') return secureJson({ error: 'method not allowed' }, { status: 405 });
   let body: { pin?: string };
   try { body = await req.json(); } catch { return secureJson({ error: 'invalid JSON' }, { status: 400 }); }
-  const pinMap: Array<[string | undefined, 'todd' | 'ty']> = [
-    [process.env.OPERATOR_TODD_PIN, 'todd'],
-    [process.env.OPERATOR_TY_PIN, 'ty'],
-  ];
-  const presented = typeof body.pin === 'string' ? body.pin : '';
-  let actor: 'todd' | 'ty' | undefined;
-  for (const [pin, candidate] of pinMap) {
-    if (!pin || pin.length !== presented.length) continue;
-    let mismatch = 0;
-    for (let index = 0; index < pin.length; index += 1) mismatch |= pin.charCodeAt(index) ^ presented.charCodeAt(index);
-    if (mismatch === 0) actor = candidate;
-  }
+  let pinConfig;
+  try { pinConfig = parseOperatorPinConfig(); }
+  catch { return secureJson({ error: 'operator auth is not configured' }, { status: 500 }); }
+  const actor = resolveOperatorFromPin(body.pin, pinConfig);
   if (!await consumeLoginAttempt(req, Boolean(actor))) {
     return secureJson({ error: 'invalid credentials' }, { status: 401, headers: { 'Retry-After': '900' } });
   }
