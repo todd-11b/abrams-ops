@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import alertsHandler from './alerts';
 import dataHandler from './data';
+import ghlHandler from './ghl';
 import photosHandler from './photos';
 import { canOperator, issueOperatorToken } from '../_lib/operator-auth';
 
@@ -39,6 +40,44 @@ describe('operator data allowlists', () => {
       expect((await post(dataHandler, '/api/operator/data', token, { table: 'jobs', filters })).status).toBe(400);
     }
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('new consult opportunities', () => {
+  it('opens in an explicit stage of the server-configured pipeline', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    process.env.GHL_SALES_PIPELINE_ID = 'server-pipeline';
+    delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
+    const created: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/pipelines')) {
+        return new Response(JSON.stringify({ pipelines: [{ id: 'server-pipeline', stages: [{ id: 'stage-consult' }, { id: 'stage-later' }] }] }), { status: 200 });
+      }
+      created.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    }));
+
+    const response = await post(ghlHandler, '/api/operator/ghl', token, { action: 'createOpportunity', contactId: 'c1', pipelineId: 'stale-client-pipeline', name: 'Customer — P-1' });
+
+    expect(response.status).toBe(200);
+    expect(created[0]).toMatchObject({ pipelineId: 'server-pipeline', pipelineStageId: 'stage-consult', status: 'open' });
+  });
+
+  it('falls back to the client pipeline and omits the stage when neither can be resolved', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    delete process.env.GHL_SALES_PIPELINE_ID;
+    delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
+    const created: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).includes('/pipelines')) return new Response('nope', { status: 500 });
+      created.push(JSON.parse(String(init?.body)));
+      return new Response('{}', { status: 200 });
+    }));
+
+    await post(ghlHandler, '/api/operator/ghl', token, { action: 'createOpportunity', contactId: 'c1', pipelineId: 'client-pipeline', name: 'Customer — P-1' });
+
+    expect(created[0]).toMatchObject({ pipelineId: 'client-pipeline' });
+    expect(created[0]).not.toHaveProperty('pipelineStageId');
   });
 });
 
