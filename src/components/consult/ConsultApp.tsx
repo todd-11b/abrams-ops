@@ -122,9 +122,9 @@ export const ConsultApp = () => {
   const [localDrafts, setLocalDrafts] = useState<any[]>([]);
   const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
 
-  // A token authorises one contact/opportunity pair, so it is only reusable
-  // while that pair is unchanged.
-  const tokenKey = `${form.contactId}|${form.opportunityId}`;
+  // A token authorises one contact/opportunity pair and freezes the price the
+  // customer signs, so it is only reusable while both are unchanged.
+  const tokenKey = JSON.stringify([form.contactId, form.opportunityId, form.fenceLines, form.gates, form.gateInstances, form.addOns]);
   const proposalToken = issuedToken?.key === tokenKey ? issuedToken.token : '';
 
   const issueProposalToken = async (): Promise<string> => {
@@ -136,7 +136,10 @@ export const ConsultApp = () => {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ contact_id: form.contactId, proposal_id: form.opportunityId }),
     });
-    if (!response.ok) throw new Error('Could not issue a protected proposal link.');
+    if (!response.ok) {
+      const reason = await response.json().then((b) => b?.error).catch(() => null);
+      throw new Error(reason ? `Could not issue a protected proposal link: ${reason}.` : 'Could not issue a protected proposal link.');
+    }
     const body = await response.json() as { token: string };
     setIssuedToken({ key: tokenKey, token: body.token });
     return body.token;
@@ -360,6 +363,29 @@ export const ConsultApp = () => {
         await crmApi.updateContact(realContactId, { address1: form.propertyAddress });
       }
 
+      // Every proposal has to hang off a pipeline opportunity, and nothing else
+      // creates one, so the first CRM save opens it. It is created before the
+      // quote is serialised so the id is saved with it and reused next time.
+      let opportunityId = form.opportunityId;
+      if (realContactId && !opportunityId) {
+        const created = await crmApi.createOpportunity({
+          contactId: realContactId,
+          pipelineId: SALES_PIPELINE_ID,
+          name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
+          monetaryValue: totals.grandTotal,
+        });
+        opportunityId = created.opportunity?.id ?? "";
+        if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
+        updateForm({ opportunityId });
+      }
+
+      // The draft written above predates the opportunity, so re-persist it with
+      // the id — otherwise reopening the customer opens a second opportunity.
+      const savedForm = { ...form, contactId: currentContactId || "", opportunityId };
+      const draft = drafts[currentContactId || ""];
+      if (draft) draft.form = savedForm;
+      localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
+
       if (realContactId) {
         const customFields = [
           { id: "rOo4tVW8Vr1YDqbKx16s", key: "contact.hoa_approval_needed", value: form.hoaApproval },
@@ -377,8 +403,8 @@ export const ConsultApp = () => {
           { id: "4sYTsRc8X1b2RgYyTYxi", key: "contact.customer_sell_price", value: totals.grandTotal },
           { id: "1aehlMpse8vflbYq2IsW", key: "contact.consultant_notes", value: form.consultantNotes },
           { id: "zDkeO0JsdPV5lc0D4Cwp", key: "contact.consultation_completed_date", value: new Date().toISOString().split('T')[0] },
-          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(form) },
-          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(form) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "contact.job_line_items_json", value: JSON.stringify(savedForm) },
+          { id: "v74WeVuNKTrjnYGM6ICN", key: "job_line_items_json", value: JSON.stringify(savedForm) },
           { id: "12YSsRRAQStXYEIGVmea", key: "contact.proposal_id", value: form.proposalId },
           { id: "kWMi7fpdhv9RyPowuU1R", key: "contact.proposal_status", value: form.proposalStatus },
           { id: "TZYAv7GtT9dtIZWrHWO7", key: "contact.proposal_sent_date", value: form.proposalSentDate || new Date().toISOString().split('T')[0] },
@@ -395,21 +421,6 @@ export const ConsultApp = () => {
         if (tag) {
           await crmApi.addTags(realContactId, [tag]);
         }
-      }
-
-      // Every proposal has to hang off a pipeline opportunity, and nothing else
-      // creates one, so the first CRM save opens it.
-      let opportunityId = form.opportunityId;
-      if (realContactId && !opportunityId) {
-        const created = await crmApi.createOpportunity({
-          contactId: realContactId,
-          pipelineId: SALES_PIPELINE_ID,
-          name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
-          monetaryValue: totals.grandTotal,
-        });
-        opportunityId = created.opportunity?.id ?? "";
-        if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
-        updateForm({ opportunityId });
       }
 
       if (markComplete && opportunityId) {

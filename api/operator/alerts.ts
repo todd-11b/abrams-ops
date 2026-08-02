@@ -5,6 +5,7 @@ import { supabaseRequest } from '../_lib/server-data';
 export const config = { runtime: 'edge' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CRM_ID = /^[A-Za-z0-9]{1,40}$/;
 
 interface JobRow { job_id: string; job_number: string; contact_id: string; status: string; blocked_reason: string | null }
 interface IssueRow { job_id: string; type: string; severity: string }
@@ -52,7 +53,7 @@ export default async function handler(req: Request) {
     reason = issue.type;
   }
 
-  const { contact } = await fetchGhlContact(job.contact_id, apiKey);
+  const { contact } = CRM_ID.test(job.contact_id) ? await fetchGhlContact(job.contact_id, apiKey) : { contact: null };
   const name = `${contact?.firstName ?? ''} ${contact?.lastName ?? ''}`.trim() || '(no name)';
   const address = contact?.address1 || '(no address)';
   const message =
