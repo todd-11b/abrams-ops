@@ -4,6 +4,17 @@ import { supabaseRequest } from '../_lib/server-data';
 
 export const config = { runtime: 'edge' };
 
+const encoder = new TextEncoder();
+
+/** Compares the bearer token without leaking its prefix through timing. */
+function secretMatches(presented: string, expected: string): boolean {
+  const a = encoder.encode(presented);
+  const b = encoder.encode(expected);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.max(a.length, b.length); i += 1) diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  return diff === 0;
+}
+
 interface BlockedJob {
   job_id: string;
   job_number: string;
@@ -20,7 +31,7 @@ interface BlockedJob {
  */
 export default async function handler(req: Request) {
   const secret = process.env.CRON_SECRET ?? '';
-  if (!secret || req.headers.get('Authorization') !== `Bearer ${secret}`) {
+  if (!secret || !secretMatches(req.headers.get('Authorization') ?? '', `Bearer ${secret}`)) {
     return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
   }
 

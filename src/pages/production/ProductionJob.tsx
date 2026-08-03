@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useJob } from '../../hooks/useJob';
 import { useChecklist } from '../../hooks/useChecklist';
+import { useUndoableToggle } from '../../hooks/useUndoableToggle';
 import { JobHeader } from '../../components/production/JobHeader';
 import { ChecklistSection } from '../../components/production/ChecklistSection';
 import { FlagIssueModal } from '../../components/production/FlagIssueModal';
@@ -18,8 +19,6 @@ import type {
   JobPhoto,
 } from '../../types/production';
 
-const UNDO_WINDOW_MS = 8000;
-
 export default function ProductionJob() {
   const { jobId } = useParams<{ jobId: string }>();
   const { job, spec, loading, setStage, block } = useJob(jobId);
@@ -30,7 +29,6 @@ export default function ProductionJob() {
   const [blockOpen, setBlockOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [photosByPhase, setPhotosByPhase] = useState<Record<string, boolean>>({});
-  const [undo, setUndo] = useState<{ message: string; revert: () => void } | null>(null);
   const [contactCard, setContactCard] = useState<{ name: string; address: string }>({
     name: '',
     address: '',
@@ -53,24 +51,11 @@ export default function ProductionJob() {
       });
   }, [job]);
 
-  useEffect(() => {
-    if (!undo) return;
-    const timer = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
-    return () => clearTimeout(timer);
-  }, [undo]);
-
-  /**
-   * A tick saves immediately — gloved hands on a windy site should not have to
-   * confirm every item — so the safety net is a brief undo rather than a dialog.
-   */
-  const toggleWithUndo = useCallback(async (itemId: string, checked: boolean) => {
-    const label = items.find((i) => i.item_id === itemId)?.label ?? 'Item';
-    await toggle(itemId, checked);
-    setUndo({
-      message: `${label} ${checked ? 'ticked' : 'unticked'}`,
-      revert: () => { setUndo(null); void toggle(itemId, !checked); },
-    });
-  }, [items, toggle]);
+  const itemLabel = useCallback(
+    (itemId: string) => items.find((i) => i.item_id === itemId)?.label ?? 'Item',
+    [items],
+  );
+  const { undo, toggleWithUndo, revert } = useUndoableToggle(toggle, itemLabel);
 
   useEffect(() => {
     if (!jobId) return;
@@ -107,7 +92,7 @@ export default function ProductionJob() {
       {undo && (
         <div className="fixed bottom-3 inset-x-3 z-30 flex items-center justify-between gap-3 bg-slate-900 text-white text-sm rounded-lg px-4 py-3 shadow-lg">
           <span className="truncate">{undo.message}</span>
-          <button onClick={undo.revert} className="shrink-0 font-bold underline px-2 py-1">Undo</button>
+          <button onClick={revert} className="shrink-0 font-bold underline px-2 py-1">Undo</button>
         </div>
       )}
 
