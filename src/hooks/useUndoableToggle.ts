@@ -20,6 +20,10 @@ export function useUndoableToggle(toggle: Toggle, label: (itemId: string) => str
   const [undo, setUndo] = useState<PendingUndo | null>(null);
   const toggleRef = useRef(toggle);
   useEffect(() => { toggleRef.current = toggle; }, [toggle]);
+  // Mirrors the offer so the reversal happens on the click, not inside a state
+  // updater, which StrictMode would run twice.
+  const pendingRef = useRef<PendingUndo | null>(null);
+  useEffect(() => { pendingRef.current = undo; }, [undo]);
 
   useEffect(() => {
     if (!undo) return;
@@ -33,10 +37,11 @@ export function useUndoableToggle(toggle: Toggle, label: (itemId: string) => str
   }, [label]);
 
   const revert = useCallback(() => {
-    setUndo((pending) => {
-      if (pending) void toggleRef.current(pending.itemId, !pending.checked);
-      return null;
-    });
+    const pending = pendingRef.current;
+    if (!pending) return;
+    pendingRef.current = null;
+    setUndo(null);
+    void toggleRef.current(pending.itemId, !pending.checked);
   }, []);
 
   return { undo, toggleWithUndo, revert };
