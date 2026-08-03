@@ -20,7 +20,7 @@ import { ProposalView } from "./ProposalView";
 import { SignPayView } from "./SignPayView";
 // @ts-ignore
 import { crmApi } from "../../lib/crm-api";
-import { operatorFetch } from "../../utils/actor";
+import { getStoredActor, operatorFetch } from "../../utils/actor";
 import {
   ConsultFormData,
   FENCE_STYLES,
@@ -123,6 +123,7 @@ export const ConsultApp = () => {
   const [sent, setSent] = useState(false);
   const [localDrafts, setLocalDrafts] = useState<any[]>([]);
   const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
+  const [invoiceMessage, setInvoiceMessage] = useState("");
 
   // A token authorises one contact/opportunity pair and freezes the price the
   // customer signs, so it is only reusable while both are unchanged.
@@ -702,6 +703,43 @@ export const ConsultApp = () => {
     }
   };
 
+  /**
+   * Drafts the deposit invoice in the CRM. It is never sent from here: the
+   * owner reviews the draft and sends it, which is also why the button is
+   * hidden for the field role.
+   */
+  const handleDraftInvoice = async () => {
+    setInvoiceMessage("");
+    if (!form.contactId || form.contactId.startsWith("local_") || !form.opportunityId) {
+      setInvoiceMessage("Save the CRM contact and opportunity before drafting an invoice.");
+      return;
+    }
+    setSending(true);
+    try {
+      const response = await operatorFetch("/api/operator/invoice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contact_id: form.contactId, proposal_id: form.opportunityId, proposal_display_id: form.proposalId }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setInvoiceMessage(body?.error ? `Could not draft the invoice: ${body.error}` : "Could not draft the invoice.");
+        return;
+      }
+      const amount = typeof body.deposit_amount === "number" ? cur(body.deposit_amount) : "";
+      setInvoiceMessage(
+        (body.reused
+          ? `Draft deposit invoice already exists for ${amount}. Review and send it in the CRM.`
+          : `Draft deposit invoice for ${amount} created. Review and send it in the CRM.`) +
+        (body.superseded_invoice_id ? " The previous draft was superseded — void it in the CRM." : ""),
+      );
+    } catch (error) {
+      setInvoiceMessage(error instanceof Error ? error.message : "Could not draft the invoice.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   const toggleSection = (idx: number) => setOpenSection(openSection === idx ? -1 : idx);
 
   if (step === "proposal") {
@@ -715,6 +753,9 @@ export const ConsultApp = () => {
         onSendForReview={() => handleSendForReview(false)}
         onRegenerateInvoice={() => handleSendForReview(true)}
         onSendToCustomer={handleSendToCustomer}
+        onDraftInvoice={handleDraftInvoice}
+        canDraftInvoice={getStoredActor() === "todd"}
+        invoiceMessage={invoiceMessage}
         sending={sending}
         sent={sent}
       />

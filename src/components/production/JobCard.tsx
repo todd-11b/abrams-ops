@@ -17,14 +17,17 @@ export function JobCard({ job, openIssueCount = 0 }: Props) {
   const unscheduledOverdue = !job.install_date
     && (daysSince(job.created_at) ?? 0) >= 5;
 
+  const awaitingDeposit = job.deposit_status !== 'paid';
   const borderClass = job.status === 'blocked'
     ? 'border-amber-400 animate-pulse'
-    : 'border-slate-200';
+    : awaitingDeposit
+      ? 'border-dashed border-slate-300'
+      : 'border-slate-200';
 
   return (
     <Link
       to={`/production/job/${job.job_id}`}
-      className={`block rounded-lg border-2 ${borderClass} bg-white p-4 hover:shadow-md transition`}
+      className={`block rounded-lg border-2 ${borderClass} bg-white p-4 hover:shadow-md transition ${awaitingDeposit ? 'opacity-60' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -32,6 +35,11 @@ export function JobCard({ job, openIssueCount = 0 }: Props) {
             <span className="font-semibold text-slate-900">{job.job_number}</span>
             <StatusBadge status={job.status} />
             <StagePill stage={job.stage} />
+            {awaitingDeposit && (
+              <span className="inline-block rounded-full bg-slate-100 text-slate-700 border border-slate-300 px-2 py-0.5 text-xs font-semibold">
+                Awaiting deposit
+              </span>
+            )}
             {openIssueCount > 0 && (
               <span className="inline-block rounded-full bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 text-xs font-semibold">
                 🚩 {openIssueCount} open

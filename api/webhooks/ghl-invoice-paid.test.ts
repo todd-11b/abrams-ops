@@ -415,4 +415,76 @@ describe('ghl-invoice-paid webhook', () => {
     const smsBody = JSON.parse(sms!.init.body as string);
     expect(smsBody.message).toContain('no matching job');
   });
+
+  it('creates the job from the deposit draft when nobody signed a proposal', async () => {
+    const calls: FetchCall[] = [];
+    let jobLookups = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      calls.push({ url, init: init || {} });
+      const method = init?.method || 'GET';
+      if (url.includes('/rest/v1/rpc/create_job_from_deposit_draft')) {
+        return new Response(JSON.stringify([{ job_id: 'job-9', job_number: 'AF-2026-0099', created: true }]), { status: 200 });
+      }
+      if (url.includes('/rest/v1/jobs') && method === 'GET') {
+        jobLookups++;
+        return new Response('[]', { status: 200 });
+      }
+      if (url.includes('/rest/v1/jobs') && method === 'PATCH') {
+        return new Response(JSON.stringify([{ job_id: 'job-9', job_number: 'AF-2026-0099', deposit_status: 'paid', final_payment_status: 'unpaid' }]), { status: 200 });
+      }
+      if (url.includes('/rest/v1/job_activity_log')) return new Response('[]', { status: 201 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-unsigned', invoiceId: 'inv-1', amountPaid: 1950 },
+    }));
+    expect(res.status).toBe(201);
+    await expect(res.json()).resolves.toMatchObject({ job_id: 'job-9', job_number: 'AF-2026-0099', status: 'paid' });
+    expect(jobLookups).toBe(1);
+    const rpc = calls.find(c => c.url.includes('create_job_from_deposit_draft'));
+    expect(JSON.parse(rpc!.init.body as string)).toEqual({ p_proposal_id: 'opp-unsigned' });
+    const patch = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
+    expect(patch?.url).toContain('deposit_status=eq.pending_invoice');
+  });
+
+  it('still alerts when a payment arrives for an opportunity with no live draft', async () => {
+    const calls: FetchCall[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      calls.push({ url, init: init || {} });
+      if (url.includes('/rest/v1/rpc/create_job_from_deposit_draft')) {
+        return new Response('{"message":"no_live_draft"}', { status: 400 });
+      }
+      if (url.includes('/rest/v1/jobs')) return new Response('[]', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-unknown', invoiceId: 'inv-2', amountPaid: 1950 },
+    }));
+    expect(res.status).toBe(422);
+    expect(calls.some(c => c.url.endsWith('/conversations/messages'))).toBe(true);
+    expect(calls.some(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH')).toBe(false);
+  });
+
+  it('does not invent a job from a draft on a final balance payment', async () => {
+    const calls: FetchCall[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      calls.push({ url, init: init || {} });
+      if (url.includes('/rest/v1/jobs')) return new Response('[]', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+
+    const res = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'opp-unsigned', invoiceId: 'inv-3', amountPaid: 1950, paymentType: 'final_balance' },
+    }));
+    expect(res.status).toBe(422);
+    expect(calls.some(c => c.url.includes('create_job_from_deposit_draft'))).toBe(false);
+  });
 });

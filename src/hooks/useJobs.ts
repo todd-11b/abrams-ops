@@ -15,7 +15,9 @@ export function useJobs() {
       .from('jobs')
       .select('*')
       .is('archived_at', null)
-      .eq('deposit_status', 'paid')
+      // Awaiting-deposit jobs are listed too, so a signed or invoiced job is
+      // never invisible while it waits for payment.
+      .in('deposit_status', ['paid', 'pending_invoice'])
       .order('install_date', { ascending: true, nullsFirst: false });
     if (error) {
       setError(error.message);

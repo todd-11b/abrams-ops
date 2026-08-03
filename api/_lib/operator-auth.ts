@@ -17,12 +17,13 @@ export type OperatorPermission =
   | 'operator:data'
   | 'operator:photos'
   | 'operator:proposals'
+  | 'operator:invoices'
   | 'ghl:standard'
   | 'ghl:broad-read'
   | 'ghl:send-message';
 
 const ROLE_PERMISSIONS: Record<OperatorClaims['role'], ReadonlySet<OperatorPermission>> = {
-  owner: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'ghl:standard', 'ghl:broad-read', 'ghl:send-message']),
+  owner: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'operator:invoices', 'ghl:standard', 'ghl:broad-read', 'ghl:send-message']),
   field: new Set(['operator:data', 'operator:photos', 'operator:proposals', 'ghl:standard', 'ghl:broad-read']),
 };
 

@@ -101,6 +101,33 @@ interface JobRow {
   final_payment_status: string;
 }
 
+/**
+ * Creates the job an unsigned deposit payment implies. Returns null when the
+ * opportunity has no live draft, which leaves the existing "no matching job"
+ * alert to fire rather than inventing a job with no priced snapshot.
+ */
+async function createJobFromDepositDraft(ctx: SbCtx, opportunityId: string): Promise<JobRow | null> {
+  let response: Response;
+  try {
+    response = await sb(ctx, 'rpc/create_job_from_deposit_draft', {
+      method: 'POST',
+      body: JSON.stringify({ p_proposal_id: opportunityId }),
+    });
+  } catch (err) {
+    console.error('[ghl-invoice-paid] deposit draft job creation failed', err);
+    return null;
+  }
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    if (!detail.includes('no_live_draft')) console.error('[ghl-invoice-paid] deposit draft job creation failed', detail);
+    return null;
+  }
+  const payload = await response.json().catch(() => null) as Array<{ job_id?: string; job_number?: string }> | null;
+  const created = Array.isArray(payload) ? payload[0] : null;
+  if (!created?.job_id || !created.job_number) return null;
+  return { job_id: created.job_id, job_number: created.job_number, deposit_status: 'pending_invoice', final_payment_status: 'unpaid' };
+}
+
 export default async function handler(req: Request) {
   if (req.method !== 'POST') return json({ error: 'POST only' }, { status: 405 });
 
@@ -163,7 +190,15 @@ export default async function handler(req: Request) {
     console.error('[ghl-invoice-paid] job lookup failed', t);
     return json({ error: 'job lookup failed' }, { status: 502 });
   }
-  const rows = (await lookupRes.json()) as JobRow[];
+  let rows = (await lookupRes.json()) as JobRow[];
+
+  // A customer can pay a deposit without ever signing a proposal, in which case
+  // the payment itself is what creates the job, priced from the snapshot frozen
+  // when the invoice was drafted.
+  if (rows.length === 0 && paymentType === 'deposit') {
+    const fromDraft = await createJobFromDepositDraft(sbCtx, opportunityId);
+    if (fromDraft) rows = [fromDraft];
+  }
 
   if (rows.length === 0) {
     console.warn('[ghl-invoice-paid] no matching job', { opportunityId, contactId, invoiceId, paymentType });
