@@ -38,13 +38,15 @@ export default async function handler(req: Request) {
   if (contentType.includes('multipart/form-data')) {
     const fd = await req.formData(); body = { action: fd.get('action'), contactId: fd.get('contactId') }; upload = fd.get('file') as File | null;
   } else { try { body = await req.json(); } catch { return secureJson({ error: 'invalid JSON' }, { status: 400 }); } }
-  const permission = body.action === 'sendSms' ? 'ghl:send-message' : ['fetchContacts', 'getPipelines'].includes(String(body.action)) ? 'ghl:broad-read' : 'ghl:standard';
+  const permission = body.action === 'sendSms' ? 'ghl:send-message' : ['fetchContacts', 'searchContacts', 'getPipelines'].includes(String(body.action)) ? 'ghl:broad-read' : 'ghl:standard';
   if (!canOperator(operator, permission)) return secureJson({ error: 'forbidden' }, { status: 403 });
   let path = ''; let method = 'GET'; let payload: unknown; let multipart: FormData | undefined;
   const contactId = id(body.contactId); const opportunityId = id(body.opportunityId);
   switch (body.action) {
     case 'fetchContacts': path = `/contacts/?locationId=${encodeURIComponent(locationId)}`; break;
-    case 'searchContacts': if (typeof body.query !== 'string' || body.query.length > 100) break; path = `/contacts/search?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(body.query)}`; break;
+    // /contacts/search is a POST endpoint with a filter body; the list
+    // endpoint fetchContacts already uses takes the same free-text query.
+    case 'searchContacts': if (typeof body.query !== 'string' || body.query.length > 100) break; path = `/contacts/?locationId=${encodeURIComponent(locationId)}&query=${encodeURIComponent(body.query)}&limit=20`; break;
     case 'getContact': if (!contactId) break; path = `/contacts/${contactId}`; break;
     case 'createContact': { const input = onlyKeys(body.input, ['firstName','lastName','phone','email']); if (!input || typeof input.firstName !== 'string' || typeof input.lastName !== 'string') break; path = '/contacts/'; method = 'POST'; payload = { ...input, locationId }; break; }
     case 'updateContact': { const update = onlyKeys(body.payload, ['address1','customFields']); if (!contactId || !update || (update.customFields !== undefined && !Array.isArray(update.customFields))) break; path = `/contacts/${contactId}`; method = 'PUT'; payload = update; break; }

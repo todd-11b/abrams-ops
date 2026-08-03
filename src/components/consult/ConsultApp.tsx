@@ -109,6 +109,7 @@ export const ConsultApp = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [contactsError, setContactsError] = useState("");
+  const [searchError, setSearchError] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
@@ -201,8 +202,12 @@ export const ConsultApp = () => {
         const newOnes = found.filter(f => !existingIds.has(f.id));
         return [...prev, ...newOnes];
       });
+      setSearchError("");
     } catch (err) {
       console.error("Search failed", err);
+      // Without this the list still narrows over already-loaded contacts, so a
+      // failed search is indistinguishable from a customer who does not exist.
+      setSearchError(err instanceof Error ? err.message : "Could not reach the CRM.");
     } finally {
       setSearching(false);
     }
@@ -751,6 +756,12 @@ export const ConsultApp = () => {
               {searching ? <Loader2 size={18} className="animate-spin" /> : <Users size={18} />}
             </div>
           </div>
+
+          {searchError && (
+            <p className="text-red-500 text-sm px-1 -mt-2">
+              Customer search is unavailable, so only recently loaded customers are shown: {searchError}
+            </p>
+          )}
 
           {!showManualEntry ? (
             <button onClick={() => setShowManualEntry(true)} className="w-full bg-[#0a1f3d] rounded-2xl p-4 text-left shadow-sm flex items-center gap-3">
