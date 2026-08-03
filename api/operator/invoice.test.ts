@@ -81,7 +81,13 @@ describe('deposit invoice drafting', () => {
     await expect(response.json()).resolves.toMatchObject({ invoice_id: 'inv_1', deposit_amount: 1950, reused: false });
 
     const created = calls.find((call) => call.url.endsWith('/invoices/'));
-    expect(JSON.parse(String(created?.init?.body)).items[0].amount).toBe(1950);
+    const payload = JSON.parse(String(created?.init?.body));
+    expect(payload.items[0].amount).toBe(1950);
+    // Every field the create-invoice schema marks required, or the CRM answers 422.
+    for (const field of ['altId', 'altType', 'name', 'businessDetails', 'currency', 'items', 'discount', 'contactDetails', 'issueDate', 'sentTo', 'liveMode']) {
+      expect(payload[field], field).toBeDefined();
+    }
+    expect(payload.sentTo).toEqual({ email: ['s@example.com'], phoneNo: [] });
     expect(calls.some((call) => /invoices\/.+\/send/.test(call.url))).toBe(false);
 
     // The row is reserved before the CRM call and only then carries the id, so a

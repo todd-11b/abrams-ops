@@ -50,6 +50,12 @@ export function draftInvoicePayload(params: {
       qty: 1,
     }],
     discount: { type: 'percentage', value: 0 },
+    // Required by the create-invoice schema even though nothing is sent from
+    // here: it is who the invoice would go to when a human presses send in the CRM.
+    sentTo: {
+      email: params.contact.email ? [params.contact.email] : [],
+      phoneNo: params.contact.phoneNo ? [params.contact.phoneNo] : [],
+    },
     issueDate: params.issueDate,
     liveMode: true,
   };
