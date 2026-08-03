@@ -21,7 +21,18 @@ interface Routes {
   contact?: Response;
   existing?: unknown[];
   invoice?: Response;
+  reserve?: Response;
 }
+
+const liveDraft = (over: Record<string, unknown> = {}) => ({
+  draft_id: 'd1',
+  ghl_invoice_id: 'inv_old',
+  deposit_amount: 1950,
+  fence_spec: { fence_lines: pricedProposal.fenceLines, gates: [], addons: [], total_sections: 13, total_lf: 100, proposal_total: 3900 },
+  created_at: new Date().toISOString(),
+  job_id: null,
+  ...over,
+});
 
 function stubFetch(routes: Routes) {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
@@ -34,7 +45,10 @@ function stubFetch(routes: Routes) {
     if (url.includes('deposit_invoice_drafts') && (!init?.method || init.method === 'GET')) {
       return new Response(JSON.stringify(routes.existing ?? []), { status: 200 });
     }
-    if (url.includes('deposit_invoice_drafts')) return new Response(JSON.stringify([{}]), { status: 201 });
+    if (url.includes('deposit_invoice_drafts') && init?.method === 'POST') {
+      return routes.reserve ?? new Response(JSON.stringify([{ draft_id: 'd-new' }]), { status: 201 });
+    }
+    if (url.includes('deposit_invoice_drafts')) return new Response(JSON.stringify([{}]), { status: 200 });
     if (url.endsWith('/invoices/')) return routes.invoice ?? new Response(JSON.stringify({ _id: 'inv_1' }), { status: 201 });
     return new Response(JSON.stringify({}), { status: 200 });
   }));
@@ -70,15 +84,52 @@ describe('deposit invoice drafting', () => {
     expect(JSON.parse(String(created?.init?.body)).items[0].amount).toBe(1950);
     expect(calls.some((call) => /invoices\/.+\/send/.test(call.url))).toBe(false);
 
-    const stored = JSON.parse(String(calls.find((call) => call.url.includes('deposit_invoice_drafts') && call.init?.method === 'POST')?.init?.body));
-    expect(stored).toMatchObject({ ghl_invoice_id: 'inv_1', deposit_amount: 1950, created_by: 'todd' });
-    expect(stored.fence_spec).toMatchObject({ proposal_total: 3900 });
+    // The row is reserved before the CRM call and only then carries the id, so a
+    // second click cannot draft a second payable invoice.
+    const order = calls.map((call) => `${call.init?.method ?? 'GET'} ${call.url.includes('invoices') ? 'invoices' : call.url.includes('deposit_invoice_drafts') ? 'drafts' : 'other'}`);
+    expect(order.filter((entry) => entry.endsWith('drafts') || entry.endsWith('invoices')))
+      .toEqual(['GET drafts', 'POST drafts', 'POST invoices', 'PATCH drafts']);
+    const reserved = JSON.parse(String(calls.find((call) => call.url.includes('deposit_invoice_drafts') && call.init?.method === 'POST')?.init?.body));
+    expect(reserved).toMatchObject({ deposit_amount: 1950, created_by: 'todd' });
+    expect(reserved.ghl_invoice_id).toBeUndefined();
+    expect(reserved.fence_spec).toMatchObject({ proposal_total: 3900 });
+    expect(JSON.parse(String(calls.find((call) => call.init?.method === 'PATCH')?.init?.body))).toEqual({ ghl_invoice_id: 'inv_1' });
+  });
+
+  it('refuses a second click while the first draft is still being created', async () => {
+    const calls = stubFetch({ existing: [liveDraft({ ghl_invoice_id: null })] });
+    const { token } = await issueOperatorToken('todd', 'pin');
+    expect((await draft(token)).status).toBe(409);
+    expect(calls.some((call) => call.url.endsWith('/invoices/'))).toBe(false);
+  });
+
+  it('refuses to draft again once the deposit has become a job', async () => {
+    const calls = stubFetch({ existing: [liveDraft({ job_id: 'job-9' })] });
+    const { token } = await issueOperatorToken('todd', 'pin');
+    const response = await draft(token);
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ invoice_id: 'inv_old' });
+    expect(calls.some((call) => call.url.endsWith('/invoices/'))).toBe(false);
+  });
+
+  it('gives the reservation back when the CRM rejects the draft', async () => {
+    const calls = stubFetch({ invoice: new Response('nope', { status: 422 }) });
+    const { token } = await issueOperatorToken('todd', 'pin');
+    expect((await draft(token)).status).toBe(502);
+    const patch = calls.find((call) => call.init?.method === 'PATCH');
+    expect(patch?.url).toContain('draft_id=eq.d-new');
+    expect(JSON.parse(String(patch?.init?.body)).superseded_at).toBeTruthy();
+  });
+
+  it('loses the reservation race rather than drafting twice', async () => {
+    const calls = stubFetch({ reserve: new Response('duplicate key', { status: 409 }) });
+    const { token } = await issueOperatorToken('todd', 'pin');
+    expect((await draft(token)).status).toBe(409);
+    expect(calls.some((call) => call.url.endsWith('/invoices/'))).toBe(false);
   });
 
   it('reuses the live draft when the quote has not changed', async () => {
-    const calls = stubFetch({
-      existing: [{ draft_id: 'd1', ghl_invoice_id: 'inv_old', deposit_amount: 1950, fence_spec: { fence_lines: pricedProposal.fenceLines, gates: [], addons: [], total_sections: 13, total_lf: 100, proposal_total: 3900 } }],
-    });
+    const calls = stubFetch({ existing: [liveDraft()] });
     const { token } = await issueOperatorToken('todd', 'pin');
     const response = await draft(token);
     expect(response.status).toBe(200);
@@ -88,15 +139,14 @@ describe('deposit invoice drafting', () => {
 
   it('supersedes the previous draft when the quote has been re-priced', async () => {
     const calls = stubFetch({
-      existing: [{ draft_id: 'd1', ghl_invoice_id: 'inv_old', deposit_amount: 900, fence_spec: { fence_lines: [], gates: [], addons: [], total_sections: 4, total_lf: 30, proposal_total: 1800 } }],
+      existing: [liveDraft({ deposit_amount: 900, fence_spec: { fence_lines: [], gates: [], addons: [], total_sections: 4, total_lf: 30, proposal_total: 1800 } })],
     });
     const { token } = await issueOperatorToken('todd', 'pin');
     const response = await draft(token);
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({ invoice_id: 'inv_1', superseded_invoice_id: 'inv_old' });
-    const patch = calls.find((call) => call.init?.method === 'PATCH');
-    expect(patch?.url).toContain('draft_id=eq.d1');
-    expect(JSON.parse(String(patch?.init?.body)).superseded_at).toBeTruthy();
+    const supersede = calls.find((call) => call.init?.method === 'PATCH' && call.url.includes('draft_id=eq.d1'));
+    expect(JSON.parse(String(supersede?.init?.body)).superseded_at).toBeTruthy();
   });
 
   it('refuses a proposal it cannot price', async () => {
@@ -110,6 +160,7 @@ describe('deposit invoice drafting', () => {
       const url = String(input);
       if (url.includes('/contacts/c1')) return new Response(JSON.stringify({ contact: { customFields: [{ id: 'v74WeVuNKTrjnYGM6ICN', value: JSON.stringify(pricedProposal) }] } }), { status: 200 });
       if (url.includes('deposit_invoice_drafts') && (!init?.method || init.method === 'GET')) return new Response('[]', { status: 200 });
+      if (url.includes('deposit_invoice_drafts') && init?.method === 'POST') return new Response(JSON.stringify([{ draft_id: 'd-new' }]), { status: 201 });
       if (url.includes('deposit_invoice_drafts')) return new Response('conflict', { status: 409 });
       return new Response(JSON.stringify({ _id: 'inv_1' }), { status: 201 });
     }));

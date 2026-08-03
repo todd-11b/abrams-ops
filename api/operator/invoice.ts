@@ -9,9 +9,22 @@ const DISPLAY_ID = /^[A-Za-z0-9_-]{1,40}$/;
 
 interface DraftRow {
   draft_id: string;
-  ghl_invoice_id: string;
+  ghl_invoice_id: string | null;
   deposit_amount: number;
   fence_spec: FenceSpec;
+  created_at: string;
+  job_id: string | null;
+}
+
+/** How long a reservation that never got an invoice id blocks the opportunity. */
+const RESERVATION_TIMEOUT_MS = 120_000;
+
+async function supersede(draftId: string): Promise<boolean> {
+  const response = await supabaseRequest(`deposit_invoice_drafts?draft_id=eq.${encodeURIComponent(draftId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ superseded_at: new Date().toISOString() }),
+  });
+  return response.ok;
 }
 
 async function notifyOwner(apiKey: string, contactId: string, message: string): Promise<void> {
@@ -51,14 +64,51 @@ export default async function handler(req: Request) {
   if (deposit === null) return secureJson({ error: 'the proposal has no priced work to invoice' }, { status: 409 });
 
   const proposalId = encodeURIComponent(body.proposal_id);
-  const existingRes = await supabaseRequest(`deposit_invoice_drafts?proposal_id=eq.${proposalId}&superseded_at=is.null&select=draft_id,ghl_invoice_id,deposit_amount,fence_spec`);
+  const existingRes = await supabaseRequest(`deposit_invoice_drafts?proposal_id=eq.${proposalId}&superseded_at=is.null&select=draft_id,ghl_invoice_id,deposit_amount,fence_spec,created_at,job_id`);
   if (!existingRes.ok) return secureJson({ error: 'draft lookup failed' }, { status: 502 });
   const [existing] = await existingRes.json() as DraftRow[];
+  if (existing?.job_id) {
+    // The deposit already turned this draft into a job; another invoice for the
+    // same opportunity would be a second charge.
+    return secureJson({ error: 'this deposit has already been paid and the job exists', invoice_id: existing.ghl_invoice_id }, { status: 409 });
+  }
+  if (existing && !existing.ghl_invoice_id && Date.now() - Date.parse(existing.created_at) < RESERVATION_TIMEOUT_MS) {
+    return secureJson({ error: 'a draft for this proposal is already being created' }, { status: 409 });
+  }
   // Re-drafting an unchanged quote must not leave a second invoice a customer
   // could also pay.
-  if (existing && specMatches(existing.fence_spec, fenceSpec)) {
+  if (existing?.ghl_invoice_id && specMatches(existing.fence_spec, fenceSpec)) {
     return secureJson({ invoice_id: existing.ghl_invoice_id, deposit_amount: existing.deposit_amount, reused: true }, { status: 200 });
   }
+
+  // Supersede first: the unique index allows one live draft per opportunity, and
+  // a payment must never match a price the operator has moved on from.
+  if (existing && !await supersede(existing.draft_id)) {
+    return secureJson({ error: 'could not supersede the previous draft' }, { status: 502 });
+  }
+
+  // Reserve the opportunity before calling the CRM. A second click loses the
+  // race against the unique index here rather than after drafting a second
+  // payable invoice nothing has recorded.
+  const reserve = await supabaseRequest('deposit_invoice_drafts?select=draft_id', {
+    method: 'POST',
+    body: JSON.stringify({
+      contact_id: body.contact_id,
+      proposal_id: body.proposal_id,
+      deposit_amount: deposit,
+      fence_spec: fenceSpec,
+      created_by: operator.sub,
+    }),
+  });
+  if (reserve.status === 409) return secureJson({ error: 'a draft for this proposal is already being created' }, { status: 409 });
+  if (!reserve.ok) {
+    console.error('[operator/invoice] reservation failed', await reserve.text().catch(() => ''));
+    return secureJson({ error: 'could not record the draft' }, { status: 502 });
+  }
+  const [reserved] = await reserve.json().catch(() => []) as Array<{ draft_id?: string }>;
+  if (!reserved?.draft_id) return secureJson({ error: 'could not record the draft' }, { status: 502 });
+
+  const abandonReservation = async () => { await supersede(reserved.draft_id!); };
 
   const displayId = typeof body.proposal_display_id === 'string' && DISPLAY_ID.test(body.proposal_display_id) ? body.proposal_display_id : null;
   let created: Response;
@@ -81,38 +131,26 @@ export default async function handler(req: Request) {
       })),
     });
   } catch {
+    await abandonReservation();
     return secureJson({ error: 'could not reach the CRM to draft the invoice' }, { status: 502 });
   }
   if (!created.ok) {
     console.error('[operator/invoice] draft creation returned', created.status, await created.text().catch(() => ''));
+    await abandonReservation();
     return secureJson({ error: 'the CRM rejected the invoice draft' }, { status: 502 });
   }
   const invoiceId = readInvoiceId(await created.json().catch(() => null));
-  if (!invoiceId) return secureJson({ error: 'the CRM returned no invoice id' }, { status: 502 });
-
-  // Supersede first: the unique index allows one live draft per opportunity, and
-  // a payment must never match a price the operator has moved on from.
-  if (existing) {
-    const supersede = await supabaseRequest(`deposit_invoice_drafts?draft_id=eq.${encodeURIComponent(existing.draft_id)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ superseded_at: new Date().toISOString() }),
-    });
-    if (!supersede.ok) return secureJson({ error: 'could not supersede the previous draft', invoice_id: invoiceId }, { status: 502 });
+  if (!invoiceId) {
+    await abandonReservation();
+    return secureJson({ error: 'the CRM returned no invoice id' }, { status: 502 });
   }
 
-  const insert = await supabaseRequest('deposit_invoice_drafts', {
-    method: 'POST',
-    body: JSON.stringify({
-      contact_id: body.contact_id,
-      proposal_id: body.proposal_id,
-      ghl_invoice_id: invoiceId,
-      deposit_amount: deposit,
-      fence_spec: fenceSpec,
-      created_by: operator.sub,
-    }),
+  const record = await supabaseRequest(`deposit_invoice_drafts?draft_id=eq.${encodeURIComponent(reserved.draft_id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ ghl_invoice_id: invoiceId }),
   });
-  if (!insert.ok) {
-    console.error('[operator/invoice] draft record insert failed', await insert.text().catch(() => ''));
+  if (!record.ok) {
+    console.error('[operator/invoice] draft record failed', await record.text().catch(() => ''));
     return secureJson({ error: 'the invoice was drafted but not recorded — void it in the CRM', invoice_id: invoiceId }, { status: 502 });
   }
 

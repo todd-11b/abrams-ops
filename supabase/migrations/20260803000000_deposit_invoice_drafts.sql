@@ -6,7 +6,10 @@ CREATE TABLE deposit_invoice_drafts (
   draft_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   contact_id text NOT NULL,
   proposal_id text NOT NULL,
-  ghl_invoice_id text NOT NULL,
+  -- Null while the row reserves the opportunity, before the CRM has returned an
+  -- invoice id: the unique index below is what stops a second click drafting a
+  -- second payable invoice.
+  ghl_invoice_id text,
   deposit_amount numeric NOT NULL CHECK (deposit_amount >= 0),
   -- Server-derived snapshot of the quote, recomputed from the stored proposal
   -- when the operator drafts the invoice. No request body supplies it.
@@ -36,7 +39,8 @@ BEGIN
   SELECT * INTO v_draft FROM deposit_invoice_drafts
     WHERE proposal_id = p_proposal_id AND superseded_at IS NULL
     FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'no_live_draft' USING ERRCODE = 'P0001'; END IF;
+  -- A reservation with no invoice id yet is not something a customer can have paid.
+  IF NOT FOUND OR v_draft.ghl_invoice_id IS NULL THEN RAISE EXCEPTION 'no_live_draft' USING ERRCODE = 'P0001'; END IF;
 
   SELECT * INTO v_job FROM jobs WHERE proposal_id = p_proposal_id;
   IF NOT FOUND THEN
