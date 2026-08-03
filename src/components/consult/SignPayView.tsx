@@ -68,7 +68,7 @@ export const SignPayView = ({ form, onBack, proposalId, proposalToken }: Props) 
           </div>
           <h2 style={{ fontSize: 22, fontWeight: 800, color: "#0a1f3d", margin: "0 0 12px" }}>Proposal Signed!</h2>
           <p style={{ fontSize: 15, color: "#5f6a7d", lineHeight: 1.6, margin: "0 0 24px" }}>
-            Thanks, {first}! You'll receive your deposit invoice shortly via text and email. Your project moves to production as soon as the deposit clears.
+            Thanks, {first}! We'll review your deposit invoice and send it over by text and email. Your project moves to production as soon as the deposit clears.
           </p>
           <div style={{ background: "white", borderRadius: 12, padding: "16px 20px", border: "1px solid #e5e9ef", marginBottom: 24 }}>
             {([
