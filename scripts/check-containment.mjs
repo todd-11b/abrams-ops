@@ -104,6 +104,7 @@ if (/invoices\/[^`'"]*\/send/.test(invoiceRoute)) throw new Error('the invoice r
 if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw new Error('the invoice route is not owner-gated');
 const cronRoute = fs.readFileSync('api/cron/blocked-jobs.ts', 'utf8');
 if (!cronRoute.includes('`Bearer ${secret}`') || !cronRoute.includes('!secret ||')) throw new Error('the scheduled sweep is not gated on a configured cron secret');
+if (!cronRoute.includes('secretMatches(')) throw new Error('the cron secret is not compared in constant time');
 const restrictive = fs.readFileSync('supabase/migrations/20260801000001_operator_containment_restrict.sql', 'utf8');
 if (!restrictive.includes('REVOKE ALL ON jobs') || /CREATE POLICY\s+\w+\s+ON\s+\w+\s+FOR ALL\s+TO public\s+USING \(true\)/i.test(restrictive)) throw new Error('containment migration is permissive');
 const rollback = fs.readFileSync('supabase/rollback/20260801000002_operator_containment_rollback.sql', 'utf8');
