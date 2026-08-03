@@ -1,0 +1,3 @@
+# Vercel turns every file under api/ into a serverless function. Without this,
+# api/**/*.test.ts ship as publicly reachable endpoints that crash on invocation.
+api/**/*.test.ts
