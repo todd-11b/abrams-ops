@@ -1,11 +1,10 @@
 import { canOperator, requireOperator, secureJson } from '../_lib/operator-auth';
-import { GHL_BASE, fetchGhlContact } from '../_lib/proposal-source';
+import { sendOwnerAlertSms } from '../_lib/owner-alert';
 import { supabaseRequest } from '../_lib/server-data';
 
 export const config = { runtime: 'edge' };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const CRM_ID = /^[A-Za-z0-9]{1,40}$/;
 
 interface JobRow { job_id: string; job_number: string; contact_id: string; status: string; blocked_reason: string | null }
 interface IssueRow { job_id: string; type: string; severity: string }
@@ -53,24 +52,7 @@ export default async function handler(req: Request) {
     reason = issue.type;
   }
 
-  const { contact } = CRM_ID.test(job.contact_id) ? await fetchGhlContact(job.contact_id, apiKey) : { contact: null };
-  const name = `${contact?.firstName ?? ''} ${contact?.lastName ?? ''}`.trim() || '(no name)';
-  const address = contact?.address1 || '(no address)';
-  const message =
-    `🚨 ABRAMS ALERT\n` +
-    `Job: ${job.job_number} — ${name}\n` +
-    `Reason: ${reason}\n` +
-    `Address: ${address}\n` +
-    `Open: abramsfence.com/production/job/${job.job_id}`;
-
-  let sms: Response;
-  try {
-    sms = await fetch(`${GHL_BASE}/conversations/messages`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', Version: '2021-07-28' },
-      body: JSON.stringify({ type: 'SMS', contactId: ownerContactId, message }),
-    });
-  } catch { return secureJson({ error: 'owner alert delivery failed' }, { status: 502 }); }
-  if (!sms.ok) return secureJson({ error: 'owner alert delivery failed' }, { status: 502 });
+  const sent = await sendOwnerAlertSms(job, reason, apiKey, ownerContactId);
+  if (!sent) return secureJson({ error: 'owner alert delivery failed' }, { status: 502 });
   return secureJson({ sent: true });
 }

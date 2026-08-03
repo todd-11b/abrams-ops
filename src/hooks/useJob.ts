@@ -7,9 +7,7 @@ import {
   syncStageScheduled,
   syncStageInInstall,
   syncStageJobComplete,
-  sendOwnerAlert,
 } from '../utils/ghlSync';
-import { shouldFireBlockNotification } from '../utils/notificationThrottle';
 import type { Job, JobFenceSpec, JobStage, JobStatus } from '../types/production';
 
 export function useJob(jobId: string | undefined) {
@@ -82,15 +80,5 @@ export function useJob(jobId: string | undefined) {
     notifyRefresh('jobs');
   }, [job, append]);
 
-  const checkBlockNotification = useCallback(async () => {
-    if (!job || job.status !== 'blocked') return;
-    if (!shouldFireBlockNotification(job.blocked_at, job.last_blocked_notification_at)) return;
-    await sendOwnerAlert({ kind: 'job_blocked', jobId: job.job_id });
-    await supabase
-      .from('jobs')
-      .update({ last_blocked_notification_at: new Date().toISOString() })
-      .eq('job_id', job.job_id);
-  }, [job]);
-
-  return { job, spec, loading, error, reload: load, setStage, block, unblock, checkBlockNotification };
+  return { job, spec, loading, error, reload: load, setStage, block, unblock };
 }

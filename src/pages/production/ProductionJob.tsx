@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useCallback, useMemo, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useJob } from '../../hooks/useJob';
 import { useChecklist } from '../../hooks/useChecklist';
@@ -18,9 +18,11 @@ import type {
   JobPhoto,
 } from '../../types/production';
 
+const UNDO_WINDOW_MS = 8000;
+
 export default function ProductionJob() {
   const { jobId } = useParams<{ jobId: string }>();
-  const { job, spec, loading, setStage, block, checkBlockNotification } = useJob(jobId);
+  const { job, spec, loading, setStage, block } = useJob(jobId);
   const { items, allDone, toggle, skip } = useChecklist(jobId);
 
   const [issueOpen, setIssueOpen] = useState(false);
@@ -28,7 +30,7 @@ export default function ProductionJob() {
   const [blockOpen, setBlockOpen] = useState(false);
   const [completeOpen, setCompleteOpen] = useState(false);
   const [photosByPhase, setPhotosByPhase] = useState<Record<string, boolean>>({});
-  const [alertError, setAlertError] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ message: string; revert: () => void } | null>(null);
   const [contactCard, setContactCard] = useState<{ name: string; address: string }>({
     name: '',
     address: '',
@@ -52,11 +54,23 @@ export default function ProductionJob() {
   }, [job]);
 
   useEffect(() => {
-    if (!job) return;
-    checkBlockNotification()
-      .then(() => setAlertError(null))
-      .catch((err: unknown) => setAlertError(err instanceof Error ? err.message : 'Owner alert failed'));
-  }, [job, checkBlockNotification]);
+    if (!undo) return;
+    const timer = setTimeout(() => setUndo(null), UNDO_WINDOW_MS);
+    return () => clearTimeout(timer);
+  }, [undo]);
+
+  /**
+   * A tick saves immediately — gloved hands on a windy site should not have to
+   * confirm every item — so the safety net is a brief undo rather than a dialog.
+   */
+  const toggleWithUndo = useCallback(async (itemId: string, checked: boolean) => {
+    const label = items.find((i) => i.item_id === itemId)?.label ?? 'Item';
+    await toggle(itemId, checked);
+    setUndo({
+      message: `${label} ${checked ? 'ticked' : 'unticked'}`,
+      revert: () => { setUndo(null); void toggle(itemId, !checked); },
+    });
+  }, [items, toggle]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -90,12 +104,14 @@ export default function ProductionJob() {
         className="fixed top-3 right-3 z-20 bg-rose-600 text-white px-3 py-2 rounded-lg shadow-md text-sm"
       >🚩 Flag Issue</button>
 
+      {undo && (
+        <div className="fixed bottom-3 inset-x-3 z-30 flex items-center justify-between gap-3 bg-slate-900 text-white text-sm rounded-lg px-4 py-3 shadow-lg">
+          <span className="truncate">{undo.message}</span>
+          <button onClick={undo.revert} className="shrink-0 font-bold underline px-2 py-1">Undo</button>
+        </div>
+      )}
+
       <main className="p-3 space-y-3">
-        {alertError && (
-          <div className="border border-rose-300 bg-rose-50 text-rose-800 text-sm rounded-lg p-3">
-            Owner text alert did not send ({alertError}). Call Todd.
-          </div>
-        )}
         <OpenIssuesPanel jobId={jobId} />
         {CHECKLIST_TEMPLATE.map((sec) => (
           <ChecklistSection
@@ -104,7 +120,7 @@ export default function ProductionJob() {
             photoDescription={sec.photo_description}
             items={sections[sec.section]}
             photoUploaded={!!photosByPhase[sec.section]}
-            onToggle={toggle}
+            onToggle={toggleWithUndo}
             onSkip={skip}
             onFlagIssueHere={() => { setIssueSection(sec.section); setIssueOpen(true); }}
             photoUploadSlot={
