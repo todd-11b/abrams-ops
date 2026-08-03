@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, Eye, EyeOff, Send, Users, Printer } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, FileText, Send, Users, Printer } from "lucide-react";
 import { ConsultFormData, FENCE_STYLES, calcTotals } from "./consultTypes";
 
 interface Props {
@@ -10,6 +10,9 @@ interface Props {
   onSendForReview: () => Promise<void> | void;
   onRegenerateInvoice?: () => Promise<void> | void;
   onSendToCustomer?: () => Promise<void> | void;
+  onDraftInvoice?: () => Promise<void> | void;
+  canDraftInvoice?: boolean;
+  invoiceMessage?: string;
   onAcceptProposal?: () => Promise<void> | void;
   sending: boolean;
   sent: boolean;
@@ -337,7 +340,7 @@ function ProposalDocument({ form, totals, internalView }: {
   );
 }
 
-export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview, onSendToCustomer, onAcceptProposal, sending, sent, isPublic = false, errorMessage = "" }: Props) => {
+export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview, onSendToCustomer, onDraftInvoice, canDraftInvoice = false, invoiceMessage = "", onAcceptProposal, sending, sent, isPublic = false, errorMessage = "" }: Props) => {
 
   const [internalView, setInternalView] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -418,6 +421,14 @@ export const ProposalView = ({ form, totals, onBack, onPresent, onSendForReview,
                 {sending ? "Saving..." : (!sent ? "Save Proposal" : (!proposalSent ? "Send to Customer" : "Sent ✓"))}
               </button>
             </div>
+            {canDraftInvoice && onDraftInvoice && (
+              <button onClick={() => { void onDraftInvoice(); }} disabled={sending} style={{ background: "white", color: "#1d9e75", border: "1px solid rgba(29,158,117,0.35)", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: sending ? "default" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, minHeight: 44 }}>
+                <FileText size={16} /> Draft Deposit Invoice
+              </button>
+            )}
+            {invoiceMessage && (
+              <p style={{ fontSize: 12, color: "#5f6a7d", margin: 0, textAlign: "center" }}>{invoiceMessage}</p>
+            )}
             {form.proposalLink && (
               <button onClick={() => { navigator.clipboard.writeText(form.proposalLink || ""); setCopied(true); setTimeout(() => setCopied(false), 2000); }} style={{ background: "white", color: "#0a1f3d", border: "1px solid rgba(10,31,61,0.2)", borderRadius: 12, padding: "12px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 44 }}>
                 {copied ? "Copied!" : "Copy Proposal Link"}

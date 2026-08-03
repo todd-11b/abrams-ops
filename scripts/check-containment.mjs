@@ -20,6 +20,7 @@ const optionalServer = [
   'GHL_OUTBOUND_IP_PREFIXES',
   'GHL_SALES_PIPELINE_ID',
   'GHL_SALES_PIPELINE_STAGE_ID',
+  'GHL_BUSINESS_NAME',
 ];
 const requiredPublic = [
   'VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID',
@@ -90,6 +91,16 @@ for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create
   if (!additive.includes(`GRANT EXECUTE ON FUNCTION ${signature} TO service_role;`)) throw new Error(`service-role RPC grant missing: ${signature}`);
 }
 if (!additive.includes('v_created := FOUND;') || !additive.includes('v_job.job_number, v_created')) throw new Error('cross-token conflict result is not deduplicated');
+const deposits = fs.readFileSync('supabase/migrations/20260803000000_deposit_invoice_drafts.sql', 'utf8');
+if (!deposits.includes('REVOKE ALL ON deposit_invoice_drafts FROM PUBLIC, anon, authenticated;')) throw new Error('deposit draft table is reachable from the browser roles');
+if (!deposits.includes('REVOKE ALL ON FUNCTION create_job_from_deposit_draft(text) FROM PUBLIC, anon, authenticated;') ||
+    !deposits.includes('GRANT EXECUTE ON FUNCTION create_job_from_deposit_draft(text) TO service_role;')) {
+  throw new Error('deposit draft RPC grants are not service-role only');
+}
+if (!deposits.includes('deposit_invoice_drafts_live_proposal')) throw new Error('deposit drafts allow more than one live price per opportunity');
+const invoiceRoute = fs.readFileSync('api/operator/invoice.ts', 'utf8');
+if (/invoices\/[^`'"]*\/send/.test(invoiceRoute)) throw new Error('the invoice route sends rather than drafts');
+if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw new Error('the invoice route is not owner-gated');
 const restrictive = fs.readFileSync('supabase/migrations/20260801000001_operator_containment_restrict.sql', 'utf8');
 if (!restrictive.includes('REVOKE ALL ON jobs') || /CREATE POLICY\s+\w+\s+ON\s+\w+\s+FOR ALL\s+TO public\s+USING \(true\)/i.test(restrictive)) throw new Error('containment migration is permissive');
 const rollback = fs.readFileSync('supabase/rollback/20260801000002_operator_containment_rollback.sql', 'utf8');
