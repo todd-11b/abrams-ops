@@ -98,6 +98,23 @@ describe('new consult opportunities', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it('searches customers through the contact list endpoint the CRM accepts', async () => {
+    const { token } = await issueOperatorToken('ty', 'pin');
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      urls.push(String(input));
+      return new Response('{"contacts":[]}', { status: 200 });
+    }));
+
+    const response = await post(ghlHandler, '/api/operator/ghl', token, { action: 'searchContacts', query: 'abrams' });
+
+    expect(response.status).toBe(200);
+    // /contacts/search is POST-with-a-filter-body upstream and 400s as a GET.
+    expect(urls[0]).not.toContain('/contacts/search');
+    expect(urls[0]).toContain('/contacts/?locationId=');
+    expect(urls[0]).toContain('query=abrams');
+  });
+
   it('reports an unreachable CRM as a gateway failure rather than crashing', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('fetch failed'); }));
