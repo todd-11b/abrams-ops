@@ -29,6 +29,24 @@ describe('login rate limiting', () => {
     expect(keys[0]).toBe(keys[1]);
   });
 
+  it('falls back to x-real-ip when the edge runtime omits x-vercel-forwarded-for', async () => {
+    const keys: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      keys.push(JSON.parse(String(init?.body)).p_key_hash);
+      return new Response('true', { status: 200 });
+    }));
+    const req = (headers: Record<string, string>) =>
+      new Request('http://test/api/operator/session', { method: 'POST', headers });
+
+    expect(await consumeLoginAttempt(req({ 'x-real-ip': '203.0.113.7' }), false)).toBe(true);
+    expect(await consumeLoginAttempt(
+      req({ 'x-vercel-forwarded-for': '203.0.113.7, 10.0.0.1', 'x-real-ip': '203.0.113.7' }),
+      false,
+    )).toBe(true);
+    expect(await consumeLoginAttempt(req({ 'x-forwarded-for': '203.0.113.7' }), false)).toBe(false);
+    expect(new Set(keys).size).toBe(1);
+  });
+
   it('fails closed without a usable client address or pepper', async () => {
     const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
     expect(await consumeLoginAttempt(new Request('http://test/api/operator/session', { method: 'POST' }), false)).toBe(false);
