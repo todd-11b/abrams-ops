@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { shouldFireBlockNotification } from './notificationThrottle';
+import { shouldFireBlockNotification } from './notification-throttle';
 
 const now = new Date('2026-05-21T12:00:00Z').getTime();
 

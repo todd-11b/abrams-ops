@@ -14,6 +14,7 @@ const requiredServer = [
   'OPERATOR_TODD_PIN',
   'OPERATOR_TY_PIN',
   'OPERATOR_RATE_LIMIT_PEPPER',
+  'CRON_SECRET',
 ];
 const optionalServer = [
   'OPERATOR_SESSION_VERSION',
@@ -101,6 +102,8 @@ if (!deposits.includes('deposit_invoice_drafts_live_proposal')) throw new Error(
 const invoiceRoute = fs.readFileSync('api/operator/invoice.ts', 'utf8');
 if (/invoices\/[^`'"]*\/send/.test(invoiceRoute)) throw new Error('the invoice route sends rather than drafts');
 if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw new Error('the invoice route is not owner-gated');
+const cronRoute = fs.readFileSync('api/cron/blocked-jobs.ts', 'utf8');
+if (!cronRoute.includes('`Bearer ${secret}`') || !cronRoute.includes('!secret ||')) throw new Error('the scheduled sweep is not gated on a configured cron secret');
 const restrictive = fs.readFileSync('supabase/migrations/20260801000001_operator_containment_restrict.sql', 'utf8');
 if (!restrictive.includes('REVOKE ALL ON jobs') || /CREATE POLICY\s+\w+\s+ON\s+\w+\s+FOR ALL\s+TO public\s+USING \(true\)/i.test(restrictive)) throw new Error('containment migration is permissive');
 const rollback = fs.readFileSync('supabase/rollback/20260801000002_operator_containment_rollback.sql', 'utf8');
