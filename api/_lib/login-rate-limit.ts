@@ -3,13 +3,12 @@ import { sha256, supabaseRequest } from './server-data';
 const ADDRESS = /^[0-9a-f:.]{3,64}$/i;
 
 // Vercel sets x-vercel-forwarded-for on Node functions; the Edge runtime is
-// only guaranteed to carry x-real-ip. All three are written by the platform
-// and cannot be supplied by the client.
+// only guaranteed to carry x-real-ip. Both are written by the platform, unlike
+// x-forwarded-for, which a proxy in front of Vercel can supply.
 export function clientAddress(req: Request): string {
   const candidates = [
     req.headers.get('x-vercel-forwarded-for'),
     req.headers.get('x-real-ip'),
-    req.headers.get('x-forwarded-for')?.split(',')[0],
   ];
   for (const candidate of candidates) {
     const address = candidate?.trim() ?? '';
