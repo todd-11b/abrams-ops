@@ -214,6 +214,11 @@ export function calcSections(lf: number, spacingFt: number): number {
   return Math.ceil(lf / spacingFt);
 }
 
+export function normalizeGateQuantity(value: unknown): number {
+  const quantity = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(quantity) ? Math.max(0, Math.floor(quantity)) : 0;
+}
+
 export function calcTotals(form: ConsultFormData) {
   let fenceTotal = 0;
   let materialCostTotal = 0;
@@ -275,8 +280,8 @@ export function calcTotals(form: ConsultFormData) {
     });
   }
 
-  const walkGateTotal = form.gates.walk.qty * form.gates.walk.price;
-  const doubleGateTotal = form.gates.double.qty * form.gates.double.price;
+  const walkGateTotal = normalizeGateQuantity(form.gates.walk.qty) * form.gates.walk.price;
+  const doubleGateTotal = normalizeGateQuantity(form.gates.double.qty) * form.gates.double.price;
   const gateTotal = walkGateTotal + doubleGateTotal;
 
   const demoTotal = form.addOns.demo.enabled ? form.addOns.demo.lf * form.addOns.demo.pricePerLf : 0;
@@ -341,8 +346,8 @@ export function calcMaterialsCost(
     const sections = calcSections(line.linearFeet, style.spacingFt);
     total += sections * line.pricePerSection;
   }
-  total += gates.walk.qty * gates.walk.price;
-  total += gates.double.qty * gates.double.price;
+  total += normalizeGateQuantity(gates.walk.qty) * gates.walk.price;
+  total += normalizeGateQuantity(gates.double.qty) * gates.double.price;
   if (addOns.demo.enabled) total += addOns.demo.lf * addOns.demo.pricePerLf;
   if (addOns.stain.enabled) total += addOns.stain.sf * addOns.stain.pricePerSf;
   if (addOns.poolLatch.enabled) total += addOns.poolLatch.qty * addOns.poolLatch.priceEach;

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ArrowLeft, Eye, EyeOff, FileText, Send, Users, Printer } from "lucide-react";
-import { ConsultFormData, FENCE_STYLES, calcTotals } from "./consultTypes";
+import { ConsultFormData, FENCE_STYLES, calcTotals, normalizeGateQuantity } from "./consultTypes";
 
 interface Props {
   form: ConsultFormData;
@@ -37,8 +37,8 @@ function ProposalDocument({ form, totals, internalView }: {
   const primaryLine = form.fenceLines[0];
   const primaryStyle = primaryLine ? FENCE_STYLES[primaryLine.style] : null;
   const totalLF = form.fenceLines.reduce((s, l) => s + (l.linearFeet || 0), 0);
-  const totalWalkGates = form.gates.walk.qty;
-  const totalDoubleGates = form.gates.double.qty;
+  const totalWalkGates = normalizeGateQuantity(form.gates.walk.qty);
+  const totalDoubleGates = normalizeGateQuantity(form.gates.double.qty);
 
   const projectParts = [
     `Supply and install approximately ${totalLF} linear feet of`,
@@ -196,15 +196,15 @@ function ProposalDocument({ form, totals, internalView }: {
               <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{cur(lb.lineTotal)}</span>
             </div>
           ))}
-          {form.gates.walk.qty > 0 && (
+          {totalWalkGates > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, borderBottom: "1px solid #f0f2f5" }}>
-              <span>Walk Gate ×{form.gates.walk.qty}</span>
+              <span>Walk Gate ×{totalWalkGates}</span>
               <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{cur(totals.walkGateTotal)}</span>
             </div>
           )}
-          {form.gates.double.qty > 0 && (
+          {totalDoubleGates > 0 && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 13, borderBottom: "1px solid #f0f2f5" }}>
-              <span>Double Gate ×{form.gates.double.qty}</span>
+              <span>Double Gate ×{totalDoubleGates}</span>
               <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{cur(totals.doubleGateTotal)}</span>
             </div>
           )}
@@ -274,8 +274,8 @@ function ProposalDocument({ form, totals, internalView }: {
                       <span style={{ fontWeight: 700 }}>{m.qty} {m.unit}</span>
                     </div>
                   ))}
-                  {form.gates.walk.qty > 0 && <div style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between" }}><span>Walk Gate Kits</span><span style={{ fontWeight: 700 }}>{form.gates.walk.qty} pcs</span></div>}
-                  {form.gates.double.qty > 0 && <div style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between" }}><span>Double Gate Kits</span><span style={{ fontWeight: 700 }}>{form.gates.double.qty} pcs</span></div>}
+                  {totalWalkGates > 0 && <div style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between" }}><span>Walk Gate Kits</span><span style={{ fontWeight: 700 }}>{totalWalkGates} pcs</span></div>}
+                  {totalDoubleGates > 0 && <div style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between" }}><span>Double Gate Kits</span><span style={{ fontWeight: 700 }}>{totalDoubleGates} pcs</span></div>}
                 </div>
               </div>
               <div style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between", padding: "6px 0 0", borderTop: "1px solid #fde68a", marginTop: 6 }}>

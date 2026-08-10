@@ -83,4 +83,20 @@ describe('VisualLayoutSection synchronization', () => {
     );
     expect(onChange).toHaveBeenCalledTimes(1);
   });
+
+  it('removes restored gate instances when their quantity normalizes to zero', async () => {
+    const onChange = vi.fn();
+    render(
+      <VisualLayoutSection
+        data={layoutData({
+          gates: { walk: { qty: Number.NaN, price: 425 }, double: { qty: 0, price: 850 } },
+          gateInstances: [{ id: 'gate-1', type: 'walk' }],
+        })}
+        onChange={onChange}
+      />,
+    );
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(onChange.mock.calls[0][0].gateInstances).toEqual([]);
+  });
 });

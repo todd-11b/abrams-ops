@@ -33,9 +33,10 @@ describe('ConsultApp draft timestamps', () => {
   });
 
   it('creates timestamps only when the user saves a draft', async () => {
-    const now = vi.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValueOnce(200).mockReturnValue(300);
+    vi.spyOn(Date, 'now').mockReturnValue(300);
+    const setItem = vi.spyOn(Storage.prototype, 'setItem');
     render(<ConsultApp />);
-    expect(now).not.toHaveBeenCalled();
+    expect(localStorage.getItem('abrams_drafts')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: /new \/ walk-in customer/i }));
     fireEvent.change(screen.getByPlaceholderText('First Last'), { target: { value: 'Test Customer' } });
@@ -43,9 +44,25 @@ describe('ConsultApp draft timestamps', () => {
     fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
 
     await waitFor(() => expect(crmApi.createContact).toHaveBeenCalledTimes(1));
+    const persistedDraftTransitions = setItem.mock.calls
+      .filter(([key]) => key === 'abrams_drafts')
+      .map(([, value]) => JSON.parse(value));
+    expect(persistedDraftTransitions).toEqual([
+      expect.objectContaining({
+        local_300: expect.objectContaining({ timestamp: 300 }),
+      }),
+      expect.objectContaining({
+        'contact-1': expect.objectContaining({ timestamp: 300 }),
+      }),
+      expect.objectContaining({
+        'contact-1': expect.objectContaining({
+          timestamp: 300,
+          form: expect.objectContaining({ opportunityId: 'opp-1' }),
+        }),
+      }),
+    ]);
     const drafts = JSON.parse(localStorage.getItem('abrams_drafts') || '{}');
     expect(drafts['contact-1'].timestamp).toBe(300);
-    expect(now).toHaveBeenCalledTimes(3);
 
     fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
     await waitFor(() => expect(crmApi.updateOpportunityValue).toHaveBeenCalledTimes(1));

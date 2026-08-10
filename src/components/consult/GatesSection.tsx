@@ -1,4 +1,4 @@
-import { ConsultFormData } from "./consultTypes";
+import { ConsultFormData, normalizeGateQuantity } from "./consultTypes";
 
 interface Props {
   data: ConsultFormData;
@@ -63,8 +63,9 @@ export const GatesSection = ({ data, onChange }: Props) => {
   const g = data.gates;
 
   const updateGateQty = (type: "walk" | "double", newQty: number) => {
-    const currentQty = type === "walk" ? g.walk.qty : g.double.qty;
-    const diff = newQty - currentQty;
+    const normalizedQty = normalizeGateQuantity(newQty);
+    const currentQty = normalizeGateQuantity(type === "walk" ? g.walk.qty : g.double.qty);
+    const diff = normalizedQty - currentQty;
 
     let newInstances = [...(data.gateInstances || [])];
 
@@ -91,7 +92,7 @@ export const GatesSection = ({ data, onChange }: Props) => {
     }
 
     onChange({
-      gates: { ...g, [type]: { ...g[type], qty: newQty } },
+      gates: { ...g, [type]: { ...g[type], qty: normalizedQty } },
       gateInstances: newInstances
     });
   };
