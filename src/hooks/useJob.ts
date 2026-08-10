@@ -1,5 +1,5 @@
 // src/hooks/useJob.ts
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { notifyRefresh, subscribeToRefresh } from '../lib/dataRefresh';
 import { useActivityLog } from './useActivityLog';
@@ -15,15 +15,19 @@ export function useJob(jobId: string | undefined) {
   const [spec, setSpec] = useState<JobFenceSpec | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const active = useRef(true);
+  const requestGeneration = useRef(0);
   const { append } = useActivityLog();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
     if (!jobId) return;
+    if (!isActive()) return;
     setLoading(true);
     const [j, s] = await Promise.all([
       supabase.from('jobs').select('*').eq('job_id', jobId).maybeSingle(),
       supabase.from('job_fence_specs').select('*').eq('job_id', jobId).maybeSingle(),
     ]);
+    if (!isActive()) return;
     if (j.error) { setError(j.error.message); setLoading(false); return; }
     setJob((j.data ?? null) as Job | null);
     setSpec((s.data ?? null) as JobFenceSpec | null);
@@ -32,20 +36,25 @@ export function useJob(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    let cancelled = false;
+    active.current = true;
+    const generation = requestGeneration;
+    let effectActive = true;
     let initialStarted = false;
     const refresh = () => {
       initialStarted = true;
-      return load();
+      const request = ++generation.current;
+      return load(() => effectActive && active.current && request === generation.current);
     };
     const start = async () => {
       await Promise.resolve();
-      if (!cancelled && !initialStarted) await refresh();
+      if (effectActive && active.current && !initialStarted) await refresh();
     };
     void start();
     const unsubscribe = jobId ? subscribeToRefresh('jobs', refresh) : undefined;
     return () => {
-      cancelled = true;
+      effectActive = false;
+      active.current = false;
+      generation.current++;
       unsubscribe?.();
     };
   }, [jobId, load]);
@@ -93,5 +102,10 @@ export function useJob(jobId: string | undefined) {
     notifyRefresh('jobs');
   }, [job, append]);
 
-  return { job, spec, loading, error, reload: load, setStage, block, unblock };
+  const reload = useCallback(() => {
+    const request = ++requestGeneration.current;
+    return load(() => active.current && request === requestGeneration.current);
+  }, [load]);
+
+  return { job, spec, loading, error, reload, setStage, block, unblock };
 }

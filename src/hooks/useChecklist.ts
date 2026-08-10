@@ -1,5 +1,5 @@
 // src/hooks/useChecklist.ts
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useActivityLog } from './useActivityLog';
 import { buildChecklistRowsForJob } from '../utils/checklistTemplate';
@@ -13,14 +13,18 @@ export function useChecklist(jobId: string | undefined) {
   const [items, setItems] = useState<ChecklistItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { append } = useActivityLog();
+  const active = useRef(true);
+  const requestGeneration = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
     if (!jobId) return;
+    if (!isActive()) return;
     setLoading(true);
     const { data, error } = await supabase
       .from('job_checklists')
       .select('*')
       .eq('job_id', jobId);
+    if (!isActive()) return;
     if (error) {
       console.error('[useChecklist] load failed:', error);
       setItems([]);
@@ -36,6 +40,7 @@ export function useChecklist(jobId: string | undefined) {
         .from('job_checklists')
         .insert(seeds)
         .select('*');
+      if (!isActive()) return;
       if (insErr) {
         console.error('[useChecklist] seed insert failed:', insErr);
       } else {
@@ -56,18 +61,29 @@ export function useChecklist(jobId: string | undefined) {
       console.warn('[useChecklist] localStorage parse failed:', e);
     }
 
-    setItems(rows);
-    setLoading(false);
+    if (isActive()) {
+      setItems(rows);
+      setLoading(false);
+    }
   }, [jobId]);
 
   useEffect(() => {
-    let cancelled = false;
+    active.current = true;
+    const generation = requestGeneration;
+    let effectActive = true;
     const start = async () => {
       await Promise.resolve();
-      if (!cancelled) await load();
+      if (effectActive && active.current) {
+        const request = ++generation.current;
+        await load(() => effectActive && active.current && request === generation.current);
+      }
     };
     void start();
-    return () => { cancelled = true; };
+    return () => {
+      effectActive = false;
+      active.current = false;
+      generation.current++;
+    };
   }, [load]);
 
   const persistLocal = useCallback((next: ChecklistItem[]) => {
@@ -120,6 +136,10 @@ export function useChecklist(jobId: string | undefined) {
   const sectionDone = useCallback((section: ChecklistSectionKey) =>
     items.filter((i) => i.section === section).every((i) => i.checked || i.skipped)
   , [items]);
+  const reload = useCallback(() => {
+    const request = ++requestGeneration.current;
+    return load(() => active.current && request === requestGeneration.current);
+  }, [load]);
 
-  return { items, loading, toggle, skip, allDone, sectionDone, reload: load };
+  return { items, loading, toggle, skip, allDone, sectionDone, reload };
 }
