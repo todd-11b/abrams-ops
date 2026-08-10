@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 // This guards the committed migration contract; it does not prove live application.
 const migrationPath = fileURLToPath(
   new URL(
-    '../supabase/migrations/20260810170636_harden_generate_job_number_search_path.sql',
+    '../supabase/migrations/20260810172021_harden_generate_job_number_search_path.sql',
     import.meta.url,
   ),
 );
