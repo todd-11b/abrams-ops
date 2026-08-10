@@ -27,7 +27,7 @@ const currentTimestamp = () => Date.now();
 
 interface LocalDraft {
   timestamp: number;
-  form: ConsultFormData;
+  form: Record<string, unknown>;
 }
 
 interface PipelineRecord {
@@ -38,20 +38,40 @@ interface PipelineRecord {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
-const stringValue = (value: unknown): string => typeof value === "string" ? value : "";
+const stringValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+};
 
-const isConsultFormData = (value: unknown): value is ConsultFormData => isRecord(value);
+const isConsultFormData = (value: unknown): value is ConsultFormData => {
+  if (!isRecord(value)) return false;
+  const stringFields = [
+    "contactId", "contactName", "contactPhone", "contactEmail", "pipelineStage", "opportunityId",
+    "propertyAddress", "hoaApproval", "sprinklers", "lotNotes", "yardSensitivity", "cleanSiteRisks",
+    "petConsiderations", "fenceType", "timeline", "consultantNotes", "proposalId", "proposalStatus",
+    "proposalSentDate",
+  ];
+  const arrayFields = ["fenceLines", "gateInstances", "obstructions", "purposes", "photos"];
+  if (!stringFields.every((key) => typeof value[key] === "string") ||
+      !arrayFields.every((key) => Array.isArray(value[key])) ||
+      !isRecord(value.gates) || !isRecord(value.gates.walk) || !isRecord(value.gates.double) ||
+      !isRecord(value.addOns) || !isRecord(value.addOns.demo) || !isRecord(value.addOns.stain) ||
+      !isRecord(value.addOns.poolLatch)) return false;
+  return true;
+};
 
 const isLocalDraft = (value: unknown): value is LocalDraft =>
-  isRecord(value) && typeof value.timestamp === "number" && isConsultFormData(value.form);
+  isRecord(value) && typeof value.timestamp === "number" && isRecord(value.form);
 
 const parseLocalDraftRecord = (raw: string): Record<string, LocalDraft> => {
-  const parsed: unknown = JSON.parse(raw);
-  if (!isRecord(parsed)) throw new TypeError("Stored drafts must be an object.");
-  return Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
-    if (!isLocalDraft(value)) throw new TypeError(`Stored draft ${key} is malformed.`);
-    return [key, value];
-  }));
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, LocalDraft] =>
+      isLocalDraft(entry[1])));
+  } catch {
+    return {};
+  }
 };
 
 const sortDrafts = (drafts: Record<string, LocalDraft>): LocalDraft[] =>
@@ -120,8 +140,7 @@ interface Contact {
   opportunityId: string;
 }
 
-const toContact = (value: unknown): Contact => {
-  if (!isRecord(value)) throw new TypeError("CRM contact must be an object.");
+const toContact = (value: Record<string, unknown>): Contact => {
   const firstName = stringValue(value.firstName);
   const lastName = stringValue(value.lastName);
   return {
@@ -203,7 +222,7 @@ export const ConsultApp = () => {
         if (!isRecord(json)) throw new TypeError("CRM contacts response must be an object.");
         const contactList = json.contacts == null ? [] : json.contacts;
         if (!Array.isArray(contactList)) throw new TypeError("CRM contacts must be an array.");
-        const list = contactList.map(toContact);
+        const list = contactList.filter(isRecord).map(toContact);
         setContacts(list);
         setContactsError("");
       } catch (err) {
@@ -227,7 +246,7 @@ export const ConsultApp = () => {
       if (!isRecord(json)) throw new TypeError("CRM search response must be an object.");
       const contactList = json.contacts == null ? [] : json.contacts;
       if (!Array.isArray(contactList)) throw new TypeError("CRM search contacts must be an array.");
-      const found = contactList.map(toContact);
+      const found = contactList.filter(isRecord).map(toContact);
 
       setContacts(prev => {
         const existingIds = new Set(prev.map(p => p.id));
@@ -309,7 +328,7 @@ export const ConsultApp = () => {
     const drafts = parseLocalDraftRecord(localStorage.getItem("abrams_drafts") || "{}");
     const savedDraft = drafts[c.id];
 
-    if (savedDraft && savedDraft.form) {
+    if (savedDraft && isConsultFormData(savedDraft.form)) {
       console.log("LOADING PROPOSAL FROM LOCAL DRAFT");
       setForm(savedDraft.form);
     } else {
@@ -510,7 +529,8 @@ export const ConsultApp = () => {
     }
   };
 
-  const handleSendForReview = async () => {
+  const handleSendForReview = async (forceRegenerate = false) => {
+    void forceRegenerate;
     setSending(true);
     setSaveStatus("idle");
 
@@ -797,8 +817,8 @@ export const ConsultApp = () => {
         onBack={() => setStep("consult")}
         onPresent={async () => { setSaveStatus('idle'); setSaveMessage(''); try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
         errorMessage={saveStatus === 'error' ? saveMessage : ''}
-        onSendForReview={handleSendForReview}
-        onRegenerateInvoice={handleSendForReview}
+        onSendForReview={() => handleSendForReview(false)}
+        onRegenerateInvoice={() => handleSendForReview(true)}
         onSendToCustomer={handleSendToCustomer}
         onDraftInvoice={handleDraftInvoice}
         canDraftInvoice={getStoredActor() === "todd"}
@@ -892,14 +912,15 @@ export const ConsultApp = () => {
                     <div className="flex-1 h-px bg-gray-200" />
                   </div>
                   {localDrafts.map((d) => (
-                    <button key={d.form.contactId} onClick={() => {
+                    <button key={stringValue(d.form.contactId)} onClick={() => {
+                      if (!isConsultFormData(d.form)) return;
                       setSelectedContact({ id: d.form.contactId, name: d.form.contactName, phone: d.form.contactPhone, email: d.form.contactEmail, address: d.form.propertyAddress, stage: d.form.pipelineStage, opportunityId: d.form.opportunityId });
                       setForm(d.form);
                     }} className="w-full bg-white rounded-2xl p-4 text-left border border-gray-200 active:bg-gray-50 shadow-sm mt-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="font-bold text-[#0a1f3d] text-base">{d.form.contactName}</p>
-                          <p className="text-gray-500 text-sm mt-0.5">{d.form.propertyAddress || d.form.contactPhone || "No details"}</p>
+                          <p className="font-bold text-[#0a1f3d] text-base">{stringValue(d.form.contactName)}</p>
+                          <p className="text-gray-500 text-sm mt-0.5">{stringValue(d.form.propertyAddress) || stringValue(d.form.contactPhone) || "No details"}</p>
                         </div>
                         <span className="text-xs bg-orange-100 text-orange-700 font-medium px-2 py-1 rounded-full mt-0.5 shrink-0 ml-2">Saved</span>
                       </div>

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConsultApp } from './ConsultApp';
 
 const crmApi = vi.hoisted(() => ({
-  fetchContacts: vi.fn(async () => ({ contacts: [] })),
-  searchContacts: vi.fn(async () => ({ contacts: [] })),
+  fetchContacts: vi.fn<() => Promise<unknown>>(async () => ({ contacts: [] })),
+  searchContacts: vi.fn<(query: string) => Promise<unknown>>(async () => ({ contacts: [] })),
   getContact: vi.fn(async () => ({ contact: { id: 'contact-1', customFields: [] } })),
   createContact: vi.fn(async () => ({ contact: { id: 'contact-1' } })),
   createOpportunity: vi.fn(async () => ({ opportunity: { id: 'opp-1' } })),
@@ -80,6 +80,28 @@ describe('ConsultApp draft timestamps', () => {
     const newer = await screen.findByText('Newer Draft');
     const older = screen.getByText('Older Draft');
     expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('keeps valid persisted drafts when a neighboring entry is malformed', async () => {
+    localStorage.setItem('abrams_drafts', JSON.stringify({
+      broken: 'not-a-draft',
+      valid: { timestamp: 200, form: { contactId: 'valid', contactName: 'Valid Draft' } },
+    }));
+
+    render(<ConsultApp />);
+
+    expect(await screen.findByText('Valid Draft')).toBeTruthy();
+  });
+
+  it('skips malformed contacts while preserving numeric CRM identifiers as text', async () => {
+    crmApi.fetchContacts.mockResolvedValueOnce({
+      contacts: [null, { id: 123, firstName: 'Ada', lastName: 'Lovelace', phone: 555 }],
+    });
+
+    render(<ConsultApp />);
+
+    expect(await screen.findByText('Ada Lovelace')).toBeTruthy();
+    expect(screen.getByText('555')).toBeTruthy();
   });
 
   it('creates the default form once rather than on every render', async () => {
