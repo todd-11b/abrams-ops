@@ -56,4 +56,15 @@ describe('ConsultApp draft timestamps', () => {
     const older = screen.getByText('Older Draft');
     expect(newer.compareDocumentPosition(older) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it('creates the default form once rather than on every render', async () => {
+    const randomUUID = vi.spyOn(crypto, 'randomUUID');
+    const { rerender } = render(<ConsultApp />);
+    const initialCalls = randomUUID.mock.calls.length;
+
+    rerender(<ConsultApp />);
+
+    expect(initialCalls).toBeGreaterThan(0);
+    expect(randomUUID).toHaveBeenCalledTimes(initialCalls);
+  });
 });

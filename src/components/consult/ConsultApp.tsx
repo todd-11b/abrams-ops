@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { ChevronDown, Phone, Loader2, CheckCircle, AlertCircle, UserPlus, Users } from "lucide-react";
 // @ts-ignore
 import { PropertySection } from "./PropertySection";
@@ -33,6 +33,16 @@ type AppStep = "consult" | "proposal" | "signpay";
 
 const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
 const currentTimestamp = () => Date.now();
+
+const readLocalDrafts = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const draftsObj = JSON.parse(window.localStorage.getItem("abrams_drafts") || "{}");
+    return Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
+  } catch {
+    return [];
+  }
+};
 
 const defaultForm = (): ConsultFormData => ({
   contactId: "",
@@ -115,14 +125,14 @@ export const ConsultApp = () => {
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
-  const [form, setForm] = useState<ConsultFormData>(defaultForm());
+  const [form, setForm] = useState<ConsultFormData>(() => defaultForm());
   const [openSection, setOpenSection] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
-  const [localDrafts, setLocalDrafts] = useState<any[]>([]);
+  const [localDrafts, setLocalDrafts] = useState<any[]>(readLocalDrafts);
   const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
   const [invoiceMessage, setInvoiceMessage] = useState("");
 
@@ -148,15 +158,6 @@ export const ConsultApp = () => {
     setIssuedToken({ key: tokenKey, token: body.token });
     return body.token;
   };
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      const draftsObj = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
-      const draftsArr = Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
-      setLocalDrafts(draftsArr);
-    }, 0);
-    return () => window.clearTimeout(timeoutId);
-  }, [step, selectedContact]);
 
   useEffect(() => {
     const fetchContacts = async () => {
@@ -313,9 +314,9 @@ export const ConsultApp = () => {
     }));
   };
 
-  const updateForm = (updates: Partial<ConsultFormData>) => {
+  const updateForm = useCallback((updates: Partial<ConsultFormData>) => {
     setForm((prev) => ({ ...prev, ...updates }));
-  };
+  }, []);
 
   const totals = calcTotals(form);
 

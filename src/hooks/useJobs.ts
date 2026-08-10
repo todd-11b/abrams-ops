@@ -30,10 +30,20 @@ export function useJobs() {
   }, []);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(load, 0);
-    const unsubscribe = subscribeToRefresh('jobs', load);
+    let cancelled = false;
+    let initialStarted = false;
+    const refresh = () => {
+      initialStarted = true;
+      return load();
+    };
+    const start = async () => {
+      await Promise.resolve();
+      if (!cancelled && !initialStarted) await refresh();
+    };
+    void start();
+    const unsubscribe = subscribeToRefresh('jobs', refresh);
     return () => {
-      window.clearTimeout(timeoutId);
+      cancelled = true;
       unsubscribe();
     };
   }, [load]);

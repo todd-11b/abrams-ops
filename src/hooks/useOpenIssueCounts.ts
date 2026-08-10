@@ -23,10 +23,20 @@ export function useOpenIssueCounts() {
   }, []);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(load, 0);
-    const unsubscribe = subscribeToRefresh('job_issues', load);
+    let cancelled = false;
+    let initialStarted = false;
+    const refresh = () => {
+      initialStarted = true;
+      return load();
+    };
+    const start = async () => {
+      await Promise.resolve();
+      if (!cancelled && !initialStarted) await refresh();
+    };
+    void start();
+    const unsubscribe = subscribeToRefresh('job_issues', refresh);
     return () => {
-      window.clearTimeout(timeoutId);
+      cancelled = true;
       unsubscribe();
     };
   }, [load]);

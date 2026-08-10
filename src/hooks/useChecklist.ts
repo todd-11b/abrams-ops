@@ -61,8 +61,13 @@ export function useChecklist(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(load, 0);
-    return () => window.clearTimeout(timeoutId);
+    let cancelled = false;
+    const start = async () => {
+      await Promise.resolve();
+      if (!cancelled) await load();
+    };
+    void start();
+    return () => { cancelled = true; };
   }, [load]);
 
   const persistLocal = useCallback((next: ChecklistItem[]) => {

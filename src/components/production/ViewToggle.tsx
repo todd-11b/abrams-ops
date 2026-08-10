@@ -8,11 +8,18 @@ function detectDefault(): ProductionView {
   return window.innerWidth > 768 ? 'office' : 'field';
 }
 
-export function useProductionView(): [ProductionView, (v: ProductionView) => void] {
-  const [view, setView] = useState<ProductionView>(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
+function readInitialView(): ProductionView {
+  if (typeof window === 'undefined') return 'office';
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
     return stored === 'office' || stored === 'field' ? stored : detectDefault();
-  });
+  } catch {
+    return detectDefault();
+  }
+}
+
+export function useProductionView(): [ProductionView, (v: ProductionView) => void] {
+  const [view, setView] = useState<ProductionView>(readInitialView);
   const update = (next: ProductionView) => {
     setView(next);
     localStorage.setItem(STORAGE_KEY, next);

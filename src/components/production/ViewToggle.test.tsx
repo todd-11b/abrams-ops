@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProductionView } from './ViewToggle';
 
 describe('useProductionView', () => {
@@ -22,5 +22,14 @@ describe('useProductionView', () => {
     const { result } = renderHook(() => useProductionView());
 
     expect(result.current[0]).toBe('field');
+  });
+
+  it('falls back to the viewport when storage access is blocked', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1024 });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('blocked'); });
+
+    const { result } = renderHook(() => useProductionView());
+
+    expect(result.current[0]).toBe('office');
   });
 });

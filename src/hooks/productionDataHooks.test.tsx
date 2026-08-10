@@ -42,7 +42,6 @@ function queryBuilder() {
 
 describe('production data-hook lifecycle', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
     from.mockReset();
     from.mockImplementation(() => queryBuilder());
     subscribeToRefresh.mockReset();
@@ -61,7 +60,7 @@ describe('production data-hook lifecycle', () => {
     expect(from).not.toHaveBeenCalled();
     expect(subscribeToRefresh).toHaveBeenCalledTimes(1);
 
-    await act(async () => vi.runOnlyPendingTimers());
+    await act(async () => { await Promise.resolve(); });
     expect(from).toHaveBeenCalledTimes(1);
 
     await act(async () => refresh?.());
@@ -83,7 +82,7 @@ describe('production data-hook lifecycle', () => {
     expect(from).not.toHaveBeenCalled();
     expect(subscribeToRefresh).toHaveBeenCalledWith(topic, expect.any(Function));
 
-    await act(async () => vi.runOnlyPendingTimers());
+    await act(async () => { await Promise.resolve(); });
     expect(from).toHaveBeenCalledTimes(queryCount);
     unmount();
     expect(unsubscribe).toHaveBeenCalledTimes(1);
@@ -95,9 +94,23 @@ describe('production data-hook lifecycle', () => {
     });
 
     rerender({ jobId: 'job-2' });
-    await act(async () => vi.runOnlyPendingTimers());
+    await act(async () => { await Promise.resolve(); });
 
     // One select plus first-run seed insertion for only the replacement job.
     expect(from).toHaveBeenCalledTimes(2);
+  });
+
+  it('deduplicates a refresh that arrives before the initial async boundary', async () => {
+    let refresh: (() => void) | undefined;
+    subscribeToRefresh.mockImplementation((_topic, callback) => {
+      refresh = callback;
+      return vi.fn();
+    });
+
+    renderHook(() => useJobs());
+    await act(async () => refresh?.());
+    await act(async () => { await Promise.resolve(); });
+
+    expect(from).toHaveBeenCalledTimes(1);
   });
 });

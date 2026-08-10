@@ -32,10 +32,20 @@ export function useJob(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(load, 0);
-    const unsubscribe = jobId ? subscribeToRefresh('jobs', load) : undefined;
+    let cancelled = false;
+    let initialStarted = false;
+    const refresh = () => {
+      initialStarted = true;
+      return load();
+    };
+    const start = async () => {
+      await Promise.resolve();
+      if (!cancelled && !initialStarted) await refresh();
+    };
+    void start();
+    const unsubscribe = jobId ? subscribeToRefresh('jobs', refresh) : undefined;
     return () => {
-      window.clearTimeout(timeoutId);
+      cancelled = true;
       unsubscribe?.();
     };
   }, [jobId, load]);
