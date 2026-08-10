@@ -168,6 +168,116 @@ describe('production data-hook lifecycle', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('settles useJob without a key, invalidates pending work, and later loads a valid key', async () => {
+    const oldJob = deferred<typeof queryResult>();
+    const oldSpec = deferred<typeof queryResult>();
+    const newJob = deferred<typeof queryResult>();
+    const newSpec = deferred<typeof queryResult>();
+    const results = [oldJob.promise, oldSpec.promise, newJob.promise, newSpec.promise];
+    from.mockImplementation(() => queryBuilder(results.shift()));
+
+    const { result, rerender } = renderHook(({ jobId }) => useJob(jobId), {
+      initialProps: { jobId: 'job-old' as string | undefined },
+    });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ jobId: undefined });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current).toMatchObject({ job: null, spec: null, loading: false, error: null });
+    expect(from).toHaveBeenCalledTimes(2);
+    expect(subscribeToRefresh).toHaveBeenCalledTimes(1);
+
+    rerender({ jobId: 'job-new' });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      newJob.resolve({ data: { job_id: 'job-new' }, error: null });
+      newSpec.resolve({ data: { job_id: 'job-new', fence_type: 'new' }, error: null });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      oldJob.resolve({ data: { job_id: 'job-old' }, error: null });
+      oldSpec.resolve({ data: { job_id: 'job-old', fence_type: 'old' }, error: null });
+      await Promise.resolve();
+    });
+
+    expect(result.current.job?.job_id).toBe('job-new');
+    expect(result.current.loading).toBe(false);
+    expect(from).toHaveBeenCalledTimes(4);
+    expect(subscribeToRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('settles useJobIssues without a key, invalidates pending work, and later loads a valid key', async () => {
+    const oldIssues = deferred<typeof queryResult>();
+    const newIssues = deferred<typeof queryResult>();
+    const results = [oldIssues.promise, newIssues.promise];
+    from.mockImplementation(() => queryBuilder(results.shift()));
+
+    const { result, rerender } = renderHook(({ jobId }) => useJobIssues(jobId), {
+      initialProps: { jobId: 'job-old' as string | undefined },
+    });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ jobId: undefined });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current).toMatchObject({ issues: [], photoUrls: {}, loading: false });
+    expect(from).toHaveBeenCalledTimes(1);
+    expect(subscribeToRefresh).toHaveBeenCalledTimes(1);
+
+    rerender({ jobId: 'job-new' });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      newIssues.resolve({ data: [{ issue_id: 'new', photos: [], resolved: false }], error: null });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      oldIssues.resolve({ data: [{ issue_id: 'old', photos: [], resolved: false }], error: null });
+      await Promise.resolve();
+    });
+
+    expect(result.current.issues.map((issue) => issue.issue_id)).toEqual(['new']);
+    expect(result.current.loading).toBe(false);
+    expect(from).toHaveBeenCalledTimes(2);
+    expect(subscribeToRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it('settles useChecklist without a key, invalidates pending work, and later loads a valid key', async () => {
+    const oldChecklist = deferred<typeof queryResult>();
+    const newChecklist = deferred<typeof queryResult>();
+    const results = [oldChecklist.promise, newChecklist.promise];
+    from.mockImplementation(() => queryBuilder(results.shift()));
+
+    const { result, rerender } = renderHook(({ jobId }) => useChecklist(jobId), {
+      initialProps: { jobId: 'job-old' as string | undefined },
+    });
+    await act(async () => { await Promise.resolve(); });
+    rerender({ jobId: undefined });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(result.current).toMatchObject({ items: [], loading: false });
+    expect(from).toHaveBeenCalledTimes(1);
+
+    rerender({ jobId: 'job-new' });
+    await act(async () => { await Promise.resolve(); });
+    await act(async () => {
+      newChecklist.resolve({
+        data: [{ item_id: 'new-item', job_id: 'job-new', checked: false }],
+        error: null,
+      });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      oldChecklist.resolve({
+        data: [{ item_id: 'old-item', job_id: 'job-old', checked: false }],
+        error: null,
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.items.map((item) => item.item_id)).toEqual(['new-item']);
+    expect(result.current.loading).toBe(false);
+    expect(from).toHaveBeenCalledTimes(2);
+  });
+
   it('does not commit a useJobs response after unmount', async () => {
     const pending = deferred<typeof queryResult>();
     from.mockImplementation(() => queryBuilder(pending.promise));

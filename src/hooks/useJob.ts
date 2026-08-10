@@ -13,15 +13,21 @@ import type { Job, JobFenceSpec, JobStage, JobStatus } from '../types/production
 export function useJob(jobId: string | undefined) {
   const [job, setJob] = useState<Job | null>(null);
   const [spec, setSpec] = useState<JobFenceSpec | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(jobId));
   const [error, setError] = useState<string | null>(null);
   const active = useRef(true);
   const requestGeneration = useRef(0);
   const { append } = useActivityLog();
 
   const load = useCallback(async (isActive: () => boolean = () => true) => {
-    if (!jobId) return;
     if (!isActive()) return;
+    if (!jobId) {
+      setJob(null);
+      setSpec(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const [j, s] = await Promise.all([
       supabase.from('jobs').select('*').eq('job_id', jobId).maybeSingle(),

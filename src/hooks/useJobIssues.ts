@@ -7,14 +7,19 @@ import type { JobIssue } from '../types/production';
 export function useJobIssues(jobId: string | undefined) {
   const [issues, setIssues] = useState<JobIssue[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(jobId));
   const active = useRef(true);
   const requestGeneration = useRef(0);
   const { append } = useActivityLog();
 
   const load = useCallback(async (isActive: () => boolean = () => true) => {
-    if (!jobId) return;
     if (!isActive()) return;
+    if (!jobId) {
+      setIssues([]);
+      setPhotoUrls({});
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from('job_issues')

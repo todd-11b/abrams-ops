@@ -11,14 +11,18 @@ function lsKey(jobId: string) {
 
 export function useChecklist(jobId: string | undefined) {
   const [items, setItems] = useState<ChecklistItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(jobId));
   const { append } = useActivityLog();
   const active = useRef(true);
   const requestGeneration = useRef(0);
 
   const load = useCallback(async (isActive: () => boolean = () => true) => {
-    if (!jobId) return;
     if (!isActive()) return;
+    if (!jobId) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from('job_checklists')
