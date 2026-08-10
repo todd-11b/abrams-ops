@@ -41,8 +41,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const stringValue = (value: unknown): string => typeof value === "string" ? value : "";
 
 const errorMessage = (value: unknown, fallback: string): string => {
-  if (value instanceof Error) return value.message;
-  return isRecord(value) && typeof value.message === "string" ? value.message : fallback;
+  if (value instanceof Error) return value.message || fallback;
+  return isRecord(value) && typeof value.message === "string" ? value.message || fallback : fallback;
 };
 
 const parseDraftStore = (raw: string): Record<string, unknown> => {
