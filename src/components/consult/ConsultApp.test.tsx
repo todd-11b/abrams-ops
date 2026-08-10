@@ -90,12 +90,16 @@ describe('ConsultApp draft timestamps', () => {
 
     render(<ConsultApp />);
 
-    expect(await screen.findByText('Valid Draft')).toBeTruthy();
+    fireEvent.click(await screen.findByText('Valid Draft'));
+    expect(await screen.findByRole('button', { name: /save draft/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
+    await waitFor(() => expect(crmApi.updateContact).toHaveBeenCalled());
+    expect(JSON.parse(localStorage.getItem('abrams_drafts') || '{}').broken).toBe('not-a-draft');
   });
 
-  it('skips malformed contacts while preserving numeric CRM identifiers as text', async () => {
+  it('skips malformed contacts while preserving valid neighbors', async () => {
     crmApi.fetchContacts.mockResolvedValueOnce({
-      contacts: [null, { id: 123, firstName: 'Ada', lastName: 'Lovelace', phone: 555 }],
+      contacts: [null, { id: 'contact-ada', firstName: 'Ada', lastName: 'Lovelace', phone: '555' }],
     });
 
     render(<ConsultApp />);

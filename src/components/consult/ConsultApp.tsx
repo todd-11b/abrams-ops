@@ -27,7 +27,7 @@ const currentTimestamp = () => Date.now();
 
 interface LocalDraft {
   timestamp: number;
-  form: Record<string, unknown>;
+  form: ConsultFormData;
 }
 
 interface PipelineRecord {
@@ -36,51 +36,46 @@ interface PipelineRecord {
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
-const stringValue = (value: unknown): string => {
-  if (typeof value === "string") return value;
-  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+const stringValue = (value: unknown): string => typeof value === "string" ? value : "";
+
+const errorMessage = (value: unknown, fallback: string): string => {
+  if (value instanceof Error) return value.message;
+  return isRecord(value) && typeof value.message === "string" ? value.message : fallback;
 };
 
-const isConsultFormData = (value: unknown): value is ConsultFormData => {
-  if (!isRecord(value)) return false;
-  const stringFields = [
-    "contactId", "contactName", "contactPhone", "contactEmail", "pipelineStage", "opportunityId",
-    "propertyAddress", "hoaApproval", "sprinklers", "lotNotes", "yardSensitivity", "cleanSiteRisks",
-    "petConsiderations", "fenceType", "timeline", "consultantNotes", "proposalId", "proposalStatus",
-    "proposalSentDate",
-  ];
-  const arrayFields = ["fenceLines", "gateInstances", "obstructions", "purposes", "photos"];
-  if (!stringFields.every((key) => typeof value[key] === "string") ||
-      !arrayFields.every((key) => Array.isArray(value[key])) ||
-      !isRecord(value.gates) || !isRecord(value.gates.walk) || !isRecord(value.gates.double) ||
-      !isRecord(value.addOns) || !isRecord(value.addOns.demo) || !isRecord(value.addOns.stain) ||
-      !isRecord(value.addOns.poolLatch)) return false;
-  return true;
-};
-
-const isLocalDraft = (value: unknown): value is LocalDraft =>
-  isRecord(value) && typeof value.timestamp === "number" && isRecord(value.form);
-
-const parseLocalDraftRecord = (raw: string): Record<string, LocalDraft> => {
+const parseDraftStore = (raw: string): Record<string, unknown> => {
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!isRecord(parsed)) return {};
-    return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, LocalDraft] =>
-      isLocalDraft(entry[1])));
+    return isRecord(parsed) ? parsed : {};
   } catch {
     return {};
   }
 };
 
-const sortDrafts = (drafts: Record<string, LocalDraft>): LocalDraft[] =>
-  Object.values(drafts).sort((a, b) => b.timestamp - a.timestamp);
+const normalizeConsultForm = (value: unknown): ConsultFormData | null =>
+  isRecord(value) ? Object.assign(defaultForm(), value) : null;
+
+const normalizeLocalDraft = (value: unknown): LocalDraft | null => {
+  if (!isRecord(value) || typeof value.timestamp !== "number") return null;
+  const form = normalizeConsultForm(value.form);
+  return form ? { timestamp: value.timestamp, form } : null;
+};
+
+const normalizeDrafts = (drafts: Record<string, unknown>): LocalDraft[] =>
+  Object.values(drafts).flatMap((value) => {
+    const draft = normalizeLocalDraft(value);
+    return draft ? [draft] : [];
+  });
+
+const sortDrafts = (drafts: Record<string, unknown>): LocalDraft[] =>
+  normalizeDrafts(drafts).sort((a, b) => b.timestamp - a.timestamp);
 
 const readLocalDrafts = () => {
   if (typeof window === "undefined") return [];
   try {
-    return sortDrafts(parseLocalDraftRecord(window.localStorage.getItem("abrams_drafts") || "{}"));
+    return sortDrafts(parseDraftStore(window.localStorage.getItem("abrams_drafts") || "{}"));
   } catch {
     return [];
   }
@@ -291,8 +286,8 @@ export const ConsultApp = () => {
         try {
           console.log("LOADING PROPOSAL FROM CRM");
           if (typeof jsonField.value !== "string") throw new TypeError("CRM proposal JSON must be a string.");
-          const formData: unknown = JSON.parse(jsonField.value);
-          if (!isConsultFormData(formData)) throw new TypeError("CRM proposal must be an object.");
+          const formData = normalizeConsultForm(JSON.parse(jsonField.value));
+          if (!formData) throw new TypeError("CRM proposal must be an object.");
 
           // Ensure we have at least one fence line
           if (!formData.fenceLines || formData.fenceLines.length === 0) {
@@ -325,10 +320,10 @@ export const ConsultApp = () => {
     }
 
     // Fallback to local drafts if CRM load failed or didn't have data
-    const drafts = parseLocalDraftRecord(localStorage.getItem("abrams_drafts") || "{}");
-    const savedDraft = drafts[c.id];
+    const drafts = parseDraftStore(localStorage.getItem("abrams_drafts") || "{}");
+    const savedDraft = normalizeLocalDraft(drafts[c.id]);
 
-    if (savedDraft && isConsultFormData(savedDraft.form)) {
+    if (savedDraft) {
       console.log("LOADING PROPOSAL FROM LOCAL DRAFT");
       setForm(savedDraft.form);
     } else {
@@ -395,7 +390,7 @@ export const ConsultApp = () => {
         updateForm({ contactId: currentContactId });
       }
 
-      const drafts = parseLocalDraftRecord(localStorage.getItem("abrams_drafts") || "{}");
+      const drafts = parseDraftStore(localStorage.getItem("abrams_drafts") || "{}");
       drafts[currentContactId] = {
         timestamp: currentTimestamp(),
         form: { ...form, contactId: currentContactId }
@@ -459,7 +454,7 @@ export const ConsultApp = () => {
       // the id — otherwise reopening the customer opens a second opportunity.
       const savedForm = { ...form, contactId: currentContactId || "", opportunityId };
       const draft = drafts[currentContactId || ""];
-      if (draft) draft.form = savedForm;
+      if (isRecord(draft)) draft.form = savedForm;
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
       setLocalDrafts(readLocalDrafts());
 
@@ -700,7 +695,7 @@ export const ConsultApp = () => {
       */
     } catch (err: unknown) {
       console.error("handleSendForReview failed:", err);
-      let errMsg = err instanceof Error ? err.message : "Failed to send proposal.";
+      let errMsg = errorMessage(err, "Failed to send proposal.");
       if (errMsg.includes("userId or sentFrom")) {
         errMsg = "CRM Configuration Error: The sender identity is missing in the CRM API call.";
       } else if (errMsg.includes("items should not be empty")) {
@@ -912,15 +907,14 @@ export const ConsultApp = () => {
                     <div className="flex-1 h-px bg-gray-200" />
                   </div>
                   {localDrafts.map((d) => (
-                    <button key={stringValue(d.form.contactId)} onClick={() => {
-                      if (!isConsultFormData(d.form)) return;
+                    <button key={d.form.contactId} onClick={() => {
                       setSelectedContact({ id: d.form.contactId, name: d.form.contactName, phone: d.form.contactPhone, email: d.form.contactEmail, address: d.form.propertyAddress, stage: d.form.pipelineStage, opportunityId: d.form.opportunityId });
                       setForm(d.form);
                     }} className="w-full bg-white rounded-2xl p-4 text-left border border-gray-200 active:bg-gray-50 shadow-sm mt-3">
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="font-bold text-[#0a1f3d] text-base">{stringValue(d.form.contactName)}</p>
-                          <p className="text-gray-500 text-sm mt-0.5">{stringValue(d.form.propertyAddress) || stringValue(d.form.contactPhone) || "No details"}</p>
+                          <p className="font-bold text-[#0a1f3d] text-base">{d.form.contactName}</p>
+                          <p className="text-gray-500 text-sm mt-0.5">{d.form.propertyAddress || d.form.contactPhone || "No details"}</p>
                         </div>
                         <span className="text-xs bg-orange-100 text-orange-700 font-medium px-2 py-1 rounded-full mt-0.5 shrink-0 ml-2">Saved</span>
                       </div>
