@@ -1,9 +1,14 @@
+// @vitest-environment node
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const migrationPath = resolve(
-  'supabase/migrations/20260810170636_harden_generate_job_number_search_path.sql',
+// This guards the committed migration contract; it does not prove live application.
+const migrationPath = fileURLToPath(
+  new URL(
+    '../supabase/migrations/20260810170636_harden_generate_job_number_search_path.sql',
+    import.meta.url,
+  ),
 );
 const migration = readFileSync(migrationPath, 'utf8');
 
