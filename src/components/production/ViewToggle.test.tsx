@@ -1,6 +1,17 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useProductionView } from './ViewToggle';
+import { useProductionView, ViewToggle } from './ViewToggle';
+
+describe('ViewToggle', () => {
+  it('preserves the named component export and change callback', () => {
+    const onChange = vi.fn();
+
+    render(<ViewToggle view="office" onChange={onChange} />);
+    fireEvent.click(screen.getByRole('button', { name: /field/i }));
+
+    expect(onChange).toHaveBeenCalledWith('field');
+  });
+});
 
 describe('useProductionView', () => {
   beforeEach(() => {

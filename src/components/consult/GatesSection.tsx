@@ -67,7 +67,7 @@ export const GatesSection = ({ data, onChange }: Props) => {
     const currentQty = normalizeGateQuantity(type === "walk" ? g.walk.qty : g.double.qty);
     const diff = normalizedQty - currentQty;
 
-    let newInstances = [...(data.gateInstances || [])];
+    const newInstances = [...(data.gateInstances || [])];
 
     if (diff > 0) {
       // Add new instances
