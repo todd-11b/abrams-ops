@@ -1,24 +1,14 @@
 import { useCallback, useState, useEffect } from "react";
 import { ChevronDown, Phone, Loader2, CheckCircle, AlertCircle, UserPlus, Users } from "lucide-react";
-// @ts-ignore
 import { PropertySection } from "./PropertySection";
-// @ts-ignore
 import { MeasurementsSection } from "./MeasurementsSection";
-// @ts-ignore
 import { VisualLayoutSection } from "./VisualLayoutSection";
-// @ts-ignore
 import { GatesSection } from "./GatesSection";
-// @ts-ignore
 import { AddOnsSection } from "./AddOnsSection";
-// @ts-ignore
 import { PurposeSection } from "./PurposeSection";
-// @ts-ignore
 import { PhotosSection } from "./PhotosSection";
-// @ts-ignore
 import { ProposalView } from "./ProposalView";
-// @ts-ignore
 import { SignPayView } from "./SignPayView";
-// @ts-ignore
 import { crmApi } from "../../lib/crm-api";
 import { getStoredActor, operatorFetch } from "../../utils/actor";
 import {
@@ -35,11 +25,42 @@ type AppStep = "consult" | "proposal" | "signpay";
 const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
 const currentTimestamp = () => Date.now();
 
+interface LocalDraft {
+  timestamp: number;
+  form: ConsultFormData;
+}
+
+interface PipelineRecord {
+  id?: string;
+  stages?: Array<{ id?: string; name?: string }>;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const stringValue = (value: unknown): string => typeof value === "string" ? value : "";
+
+const isConsultFormData = (value: unknown): value is ConsultFormData => isRecord(value);
+
+const isLocalDraft = (value: unknown): value is LocalDraft =>
+  isRecord(value) && typeof value.timestamp === "number" && isConsultFormData(value.form);
+
+const parseLocalDraftRecord = (raw: string): Record<string, LocalDraft> => {
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) throw new TypeError("Stored drafts must be an object.");
+  return Object.fromEntries(Object.entries(parsed).map(([key, value]) => {
+    if (!isLocalDraft(value)) throw new TypeError(`Stored draft ${key} is malformed.`);
+    return [key, value];
+  }));
+};
+
+const sortDrafts = (drafts: Record<string, LocalDraft>): LocalDraft[] =>
+  Object.values(drafts).sort((a, b) => b.timestamp - a.timestamp);
+
 const readLocalDrafts = () => {
   if (typeof window === "undefined") return [];
   try {
-    const draftsObj = JSON.parse(window.localStorage.getItem("abrams_drafts") || "{}");
-    return Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
+    return sortDrafts(parseLocalDraftRecord(window.localStorage.getItem("abrams_drafts") || "{}"));
   } catch {
     return [];
   }
@@ -99,6 +120,21 @@ interface Contact {
   opportunityId: string;
 }
 
+const toContact = (value: unknown): Contact => {
+  if (!isRecord(value)) throw new TypeError("CRM contact must be an object.");
+  const firstName = stringValue(value.firstName);
+  const lastName = stringValue(value.lastName);
+  return {
+    id: stringValue(value.id),
+    name: `${firstName} ${lastName}`.trim() || "Unknown",
+    phone: stringValue(value.phone),
+    email: stringValue(value.email),
+    address: stringValue(value.address1),
+    stage: "Contact",
+    opportunityId: "",
+  };
+};
+
 function cur(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -133,7 +169,7 @@ export const ConsultApp = () => {
   const [saveMessage, setSaveMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
-  const [localDrafts, setLocalDrafts] = useState<any[]>(readLocalDrafts);
+  const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>(readLocalDrafts);
   const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
   const [invoiceMessage, setInvoiceMessage] = useState("");
 
@@ -163,17 +199,11 @@ export const ConsultApp = () => {
   useEffect(() => {
     const fetchContacts = async () => {
       try {
-        const json = await crmApi.fetchContacts();
-        const contactList = json.contacts || [];
-        const list: Contact[] = contactList.map((c: any) => ({
-          id: c.id,
-          name: `${c.firstName || ""} ${c.lastName || ""}`.trim() || "Unknown",
-          phone: c.phone || "",
-          email: c.email || "",
-          address: c.address1 || "",
-          stage: "Contact",
-          opportunityId: "",
-        }));
+        const json: unknown = await crmApi.fetchContacts();
+        if (!isRecord(json)) throw new TypeError("CRM contacts response must be an object.");
+        const contactList = json.contacts == null ? [] : json.contacts;
+        if (!Array.isArray(contactList)) throw new TypeError("CRM contacts must be an array.");
+        const list = contactList.map(toContact);
         setContacts(list);
         setContactsError("");
       } catch (err) {
@@ -193,16 +223,11 @@ export const ConsultApp = () => {
 
     setSearching(true);
     try {
-      const json = await crmApi.searchContacts(query);
-      const found: Contact[] = (json.contacts || []).map((c: any) => ({
-        id: c.id,
-        name: `${c.firstName || ""} ${c.lastName || ""}`.trim() || "Unknown",
-        phone: c.phone || "",
-        email: c.email || "",
-        address: c.address1 || "",
-        stage: "Contact",
-        opportunityId: "",
-      }));
+      const json: unknown = await crmApi.searchContacts(query);
+      if (!isRecord(json)) throw new TypeError("CRM search response must be an object.");
+      const contactList = json.contacts == null ? [] : json.contacts;
+      if (!Array.isArray(contactList)) throw new TypeError("CRM search contacts must be an array.");
+      const found = contactList.map(toContact);
 
       setContacts(prev => {
         const existingIds = new Set(prev.map(p => p.id));
@@ -227,20 +252,28 @@ export const ConsultApp = () => {
 
     try {
       console.log("FETCHING CONTACT:", c.id);
-      const res = await crmApi.getContact(c.id);
+      const res: unknown = await crmApi.getContact(c.id);
+      if (!isRecord(res) || !isRecord(res.contact)) {
+        throw new TypeError("CRM contact response is malformed.");
+      }
       const contact = res.contact;
 
       // Try to find the job_line_items_json field
-      const jsonField = contact.customFields?.find((f: any) =>
-        f.id === "v74WeVuNKTrjnYGM6ICN" ||
-        f.key === "contact.job_line_items_json" ||
-        f.key === "job_line_items_json"
-      );
+      const customFields = contact.customFields == null ? [] : contact.customFields;
+      if (!Array.isArray(customFields)) throw new TypeError("CRM custom fields must be an array.");
+      const jsonField = customFields.find((field: unknown) => {
+        if (!isRecord(field)) return false;
+        return field.id === "v74WeVuNKTrjnYGM6ICN" ||
+          field.key === "contact.job_line_items_json" ||
+          field.key === "job_line_items_json";
+      });
 
-      if (jsonField && jsonField.value) {
+      if (isRecord(jsonField) && jsonField.value) {
         try {
           console.log("LOADING PROPOSAL FROM CRM");
-          const formData = JSON.parse(jsonField.value);
+          if (typeof jsonField.value !== "string") throw new TypeError("CRM proposal JSON must be a string.");
+          const formData: unknown = JSON.parse(jsonField.value);
+          if (!isConsultFormData(formData)) throw new TypeError("CRM proposal must be an object.");
 
           // Ensure we have at least one fence line
           if (!formData.fenceLines || formData.fenceLines.length === 0) {
@@ -273,7 +306,7 @@ export const ConsultApp = () => {
     }
 
     // Fallback to local drafts if CRM load failed or didn't have data
-    const drafts = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
+    const drafts = parseLocalDraftRecord(localStorage.getItem("abrams_drafts") || "{}");
     const savedDraft = drafts[c.id];
 
     if (savedDraft && savedDraft.form) {
@@ -343,13 +376,13 @@ export const ConsultApp = () => {
         updateForm({ contactId: currentContactId });
       }
 
-      const drafts = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
+      const drafts = parseLocalDraftRecord(localStorage.getItem("abrams_drafts") || "{}");
       drafts[currentContactId] = {
         timestamp: currentTimestamp(),
         form: { ...form, contactId: currentContactId }
       };
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
-      setLocalDrafts(Object.values(drafts).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp));
+      setLocalDrafts(sortDrafts(drafts));
 
       let realContactId = currentContactId.startsWith("local_") ? null : currentContactId;
 
@@ -358,13 +391,16 @@ export const ConsultApp = () => {
         const firstName = nameParts[0] || "Unknown";
         const lastName = nameParts.slice(1).join(" ") || "";
 
-        const createJson = await crmApi.createContact({
+        const createJson: unknown = await crmApi.createContact({
           firstName,
           lastName,
           phone: form.contactPhone
         });
 
-        realContactId = createJson.contact.id;
+        if (!isRecord(createJson) || !isRecord(createJson.contact)) {
+          throw new TypeError("CRM create-contact response is malformed.");
+        }
+        realContactId = stringValue(createJson.contact.id) || null;
         delete drafts[currentContactId];
         if (realContactId) currentContactId = realContactId;
         drafts[currentContactId || ""] = {
@@ -372,7 +408,7 @@ export const ConsultApp = () => {
           form: { ...form, contactId: currentContactId }
         };
         localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
-        setLocalDrafts(Object.values(drafts).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp));
+        setLocalDrafts(sortDrafts(drafts));
         updateForm({ contactId: currentContactId || "" });
       } else {
         await crmApi.updateContact(realContactId, { address1: form.propertyAddress });
@@ -383,13 +419,15 @@ export const ConsultApp = () => {
       // quote is serialised so the id is saved with it and reused next time.
       let opportunityId = form.opportunityId;
       if (realContactId && !opportunityId) {
-        const created = await crmApi.createOpportunity({
+        const created: unknown = await crmApi.createOpportunity({
           contactId: realContactId,
           pipelineId: SALES_PIPELINE_ID,
           name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
           monetaryValue: totals.grandTotal,
         });
-        opportunityId = created.opportunity?.id ?? "";
+        opportunityId = isRecord(created) && isRecord(created.opportunity)
+          ? stringValue(created.opportunity.id)
+          : "";
         if (!opportunityId) throw new Error("CRM did not return an opportunity id.");
         updateForm({ opportunityId });
       } else if (realContactId && opportunityId) {
@@ -472,7 +510,7 @@ export const ConsultApp = () => {
     }
   };
 
-  const handleSendForReview = async (_forceRegenerate = false) => {
+  const handleSendForReview = async () => {
     setSending(true);
     setSaveStatus("idle");
 
@@ -640,9 +678,9 @@ export const ConsultApp = () => {
       setSaveStatus("success");
       setSaveMessage("Proposal and Invoice sent successfully!");
       */
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("handleSendForReview failed:", err);
-      let errMsg = err.message || "Failed to send proposal.";
+      let errMsg = err instanceof Error ? err.message : "Failed to send proposal.";
       if (errMsg.includes("userId or sentFrom")) {
         errMsg = "CRM Configuration Error: The sender identity is missing in the CRM API call.";
       } else if (errMsg.includes("items should not be empty")) {
@@ -684,9 +722,11 @@ export const ConsultApp = () => {
 
       if (form.opportunityId) {
         // Find the stage ID for "Proposal Sent" by calling getPipelines in the background
-        crmApi.getPipelines().then(res => {
-          const pipeline = res.pipelines?.find((p: any) => p.id === SALES_PIPELINE_ID);
-          const stage = pipeline?.stages?.find((s: any) => s.name === "Proposal Sent");
+        crmApi.getPipelines().then((response: unknown) => {
+          if (!isRecord(response) || !Array.isArray(response.pipelines)) return;
+          const pipelines = response.pipelines.filter((value: unknown): value is PipelineRecord => isRecord(value));
+          const pipeline = pipelines.find((value) => value.id === SALES_PIPELINE_ID);
+          const stage = pipeline?.stages?.find((value) => value.name === "Proposal Sent");
           if (stage) {
             crmApi.updateOpportunityStatus(form.opportunityId, "open", stage.id);
           }
@@ -757,8 +797,8 @@ export const ConsultApp = () => {
         onBack={() => setStep("consult")}
         onPresent={async () => { setSaveStatus('idle'); setSaveMessage(''); try { await issueProposalToken(); setStep("signpay"); } catch (error) { setSaveStatus('error'); setSaveMessage(error instanceof Error ? error.message : 'Could not prepare signing.'); } }}
         errorMessage={saveStatus === 'error' ? saveMessage : ''}
-        onSendForReview={() => handleSendForReview(false)}
-        onRegenerateInvoice={() => handleSendForReview(true)}
+        onSendForReview={handleSendForReview}
+        onRegenerateInvoice={handleSendForReview}
         onSendToCustomer={handleSendToCustomer}
         onDraftInvoice={handleDraftInvoice}
         canDraftInvoice={getStoredActor() === "todd"}
@@ -851,7 +891,7 @@ export const ConsultApp = () => {
                     <div className="flex items-center gap-1.5 text-xs text-gray-400">Saved Drafts (Local)</div>
                     <div className="flex-1 h-px bg-gray-200" />
                   </div>
-                  {localDrafts.map((d: any) => (
+                  {localDrafts.map((d) => (
                     <button key={d.form.contactId} onClick={() => {
                       setSelectedContact({ id: d.form.contactId, name: d.form.contactName, phone: d.form.contactPhone, email: d.form.contactEmail, address: d.form.propertyAddress, stage: d.form.pipelineStage, opportunityId: d.form.opportunityId });
                       setForm(d.form);

@@ -268,7 +268,7 @@ function ProposalDocument({ form, totals, internalView }: {
               <div style={{ borderTop: "1px solid #fde68a", marginTop: 10, paddingTop: 10 }}>
                 <p style={{ fontSize: 11, color: "#92400e", margin: "0 0 6px", fontWeight: 600 }}>Material List (Quantities)</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px" }}>
-                  {totals.materialList.map((m: any, i: number) => (
+                  {totals.materialList.map((m, i) => (
                     <div key={i} style={{ fontSize: 11, color: "#92400e", display: "flex", justifyContent: "space-between" }}>
                       <span>{m.label}</span>
                       <span style={{ fontWeight: 700 }}>{m.qty} {m.unit}</span>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ZoomIn, ZoomOut, TreePine, Waves, Zap, Home, StickyNote, Trash2 } from "lucide-react";
-import { ConsultFormData, normalizeGateQuantity, Obstruction } from "./consultTypes";
+import { ConsultFormData, normalizeGateQuantity, Obstruction, GateInstance } from "./consultTypes";
 
 interface VisualLayoutSectionProps {
   data: ConsultFormData;
@@ -360,7 +360,7 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
     setSnapPoint(null);
   };
 
-  const updateGateSwing = (id: string, swing: any) => {
+  const updateGateSwing = (id: string, swing: NonNullable<GateInstance["swing"]>) => {
     const updated = (data.gateInstances || []).map(g => g.id === id ? { ...g, swing } : g);
     onChange({ gateInstances: updated });
   };
