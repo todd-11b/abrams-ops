@@ -22,7 +22,11 @@ export function useProductionView(): [ProductionView, (v: ProductionView) => voi
   const [view, setView] = useState<ProductionView>(readInitialView);
   const update = (next: ProductionView) => {
     setView(next);
-    localStorage.setItem(STORAGE_KEY, next);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // The in-memory view remains usable when storage is unavailable.
+    }
   };
   return [view, update];
 }

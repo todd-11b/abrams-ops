@@ -49,4 +49,38 @@ describe('VisualLayoutSection synchronization', () => {
     await waitFor(() => expect(laterChange).toHaveBeenCalledTimes(1));
     expect(laterChange.mock.calls[0][0].gateInstances).toHaveLength(1);
   });
+
+  it.each([
+    ['negative', -1, 0],
+    ['fractional', 1.9, 1],
+    ['NaN', Number.NaN, 0],
+    ['infinite', Number.POSITIVE_INFINITY, 0],
+  ])('normalizes %s gate quantities to a convergent target', async (_label, qty, expected) => {
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <VisualLayoutSection
+        data={layoutData({ gates: { walk: { qty, price: 425 }, double: { qty: 0, price: 850 } } })}
+        onChange={onChange}
+      />,
+    );
+
+    if (expected === 0) {
+      expect(onChange).not.toHaveBeenCalled();
+      return;
+    }
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    const gateInstances = onChange.mock.calls[0][0].gateInstances;
+    expect(gateInstances).toHaveLength(expected);
+    rerender(
+      <VisualLayoutSection
+        data={layoutData({
+          gates: { walk: { qty, price: 425 }, double: { qty: 0, price: 850 } },
+          gateInstances,
+        })}
+        onChange={onChange}
+      />,
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
 });

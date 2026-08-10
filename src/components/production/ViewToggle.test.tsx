@@ -3,7 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProductionView } from './ViewToggle';
 
 describe('useProductionView', () => {
-  beforeEach(() => localStorage.clear());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    localStorage.clear();
+  });
 
   it('initializes from valid storage without a follow-up render and persists changes', () => {
     localStorage.setItem('abrams_production_view', 'field');
@@ -31,5 +34,13 @@ describe('useProductionView', () => {
     const { result } = renderHook(() => useProductionView());
 
     expect(result.current[0]).toBe('office');
+  });
+
+  it('retains the selected view when storage writes are blocked', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('blocked'); });
+    const { result } = renderHook(() => useProductionView());
+
+    expect(() => act(() => result.current[1]('field'))).not.toThrow();
+    expect(result.current[0]).toBe('field');
   });
 });

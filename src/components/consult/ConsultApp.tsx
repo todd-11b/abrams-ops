@@ -403,6 +403,7 @@ export const ConsultApp = () => {
       const draft = drafts[currentContactId || ""];
       if (draft) draft.form = savedForm;
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
+      setLocalDrafts(readLocalDrafts());
 
       if (realContactId) {
         const customFields = [

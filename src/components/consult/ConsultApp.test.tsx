@@ -4,10 +4,13 @@ import { ConsultApp } from './ConsultApp';
 
 const crmApi = vi.hoisted(() => ({
   fetchContacts: vi.fn(async () => ({ contacts: [] })),
+  searchContacts: vi.fn(async () => ({ contacts: [] })),
+  getContact: vi.fn(async () => ({ contact: { id: 'contact-1', customFields: [] } })),
   createContact: vi.fn(async () => ({ contact: { id: 'contact-1' } })),
   createOpportunity: vi.fn(async () => ({ opportunity: { id: 'opp-1' } })),
   updateContact: vi.fn(async () => ({})),
   updateOpportunityValue: vi.fn(async () => ({})),
+  updateOpportunityStatus: vi.fn(async () => ({})),
   addTags: vi.fn(async () => ({})),
   addNote: vi.fn(async () => ({})),
   uploadPhoto: vi.fn(async () => ({})),
@@ -24,6 +27,7 @@ vi.mock('./PhotosSection', () => ({ PhotosSection: () => null }));
 
 describe('ConsultApp draft timestamps', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     localStorage.clear();
     vi.clearAllMocks();
   });
@@ -42,6 +46,10 @@ describe('ConsultApp draft timestamps', () => {
     const drafts = JSON.parse(localStorage.getItem('abrams_drafts') || '{}');
     expect(drafts['contact-1'].timestamp).toBe(300);
     expect(now).toHaveBeenCalledTimes(3);
+
+    fireEvent.click(screen.getByRole('button', { name: /save draft/i }));
+    await waitFor(() => expect(crmApi.updateOpportunityValue).toHaveBeenCalledTimes(1));
+    expect(crmApi.createOpportunity).toHaveBeenCalledTimes(1);
   });
 
   it('shows persisted drafts newest first', async () => {

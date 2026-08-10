@@ -7,6 +7,9 @@ interface VisualLayoutSectionProps {
   onChange: (updates: Partial<ConsultFormData>) => void;
 }
 
+const normalizeGateCount = (value: number) =>
+  Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+
 export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, onChange }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const scale = 5; // 5 pixels per foot
@@ -41,8 +44,8 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
 
   // Sync gate instances with quantities to ensure they always appear
   useEffect(() => {
-    const walkCount = data.gates.walk.qty || 0;
-    const doubleCount = data.gates.double.qty || 0;
+    const walkCount = normalizeGateCount(data.gates.walk.qty);
+    const doubleCount = normalizeGateCount(data.gates.double.qty);
 
     const currentWalk = (data.gateInstances || []).filter(g => g.type === "walk");
     const currentDouble = (data.gateInstances || []).filter(g => g.type === "double");
@@ -95,7 +98,10 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
       });
     }
 
-    onChange({ gateInstances: newInstances });
+    const currentInstances = data.gateInstances || [];
+    const changed = newInstances.length !== currentInstances.length
+      || newInstances.some((gate, index) => gate.id !== currentInstances[index]?.id);
+    if (changed) onChange({ gateInstances: newInstances });
   }, [data.gates.walk.qty, data.gates.double.qty, data.gateInstances, onChange]);
 
   const addObstruction = (type: Obstruction["type"]) => {
