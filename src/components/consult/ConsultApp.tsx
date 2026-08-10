@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { ChevronDown, Phone, Loader2, CheckCircle, AlertCircle, UserPlus, Users } from "lucide-react";
 // @ts-ignore
 import { PropertySection } from "./PropertySection";
@@ -27,11 +27,23 @@ import {
   FENCE_TYPE_TO_TAG,
   calcTotals,
   generateProposalId,
+  normalizeGateQuantity,
 } from "./consultTypes";
 
 type AppStep = "consult" | "proposal" | "signpay";
 
 const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
+const currentTimestamp = () => Date.now();
+
+const readLocalDrafts = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const draftsObj = JSON.parse(window.localStorage.getItem("abrams_drafts") || "{}");
+    return Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
+  } catch {
+    return [];
+  }
+};
 
 const defaultForm = (): ConsultFormData => ({
   contactId: "",
@@ -114,14 +126,14 @@ export const ConsultApp = () => {
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [manualName, setManualName] = useState("");
   const [manualPhone, setManualPhone] = useState("");
-  const [form, setForm] = useState<ConsultFormData>(defaultForm());
+  const [form, setForm] = useState<ConsultFormData>(() => defaultForm());
   const [openSection, setOpenSection] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
   const [saveMessage, setSaveMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
-  const [localDrafts, setLocalDrafts] = useState<any[]>([]);
+  const [localDrafts, setLocalDrafts] = useState<any[]>(readLocalDrafts);
   const [issuedToken, setIssuedToken] = useState<{ key: string; token: string } | null>(null);
   const [invoiceMessage, setInvoiceMessage] = useState("");
 
@@ -147,12 +159,6 @@ export const ConsultApp = () => {
     setIssuedToken({ key: tokenKey, token: body.token });
     return body.token;
   };
-
-  useEffect(() => {
-    const draftsObj = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
-    const draftsArr = Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
-    setLocalDrafts(draftsArr);
-  }, [step, selectedContact]);
 
   useEffect(() => {
     const fetchContacts = async () => {
@@ -309,9 +315,9 @@ export const ConsultApp = () => {
     }));
   };
 
-  const updateForm = (updates: Partial<ConsultFormData>) => {
+  const updateForm = useCallback((updates: Partial<ConsultFormData>) => {
     setForm((prev) => ({ ...prev, ...updates }));
-  };
+  }, []);
 
   const totals = calcTotals(form);
 
@@ -333,13 +339,13 @@ export const ConsultApp = () => {
     try {
       let currentContactId = form.contactId;
       if (!currentContactId) {
-        currentContactId = "local_" + Date.now().toString();
+        currentContactId = "local_" + currentTimestamp().toString();
         updateForm({ contactId: currentContactId });
       }
 
       const drafts = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
       drafts[currentContactId] = {
-        timestamp: Date.now(),
+        timestamp: currentTimestamp(),
         form: { ...form, contactId: currentContactId }
       };
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
@@ -362,7 +368,7 @@ export const ConsultApp = () => {
         delete drafts[currentContactId];
         if (realContactId) currentContactId = realContactId;
         drafts[currentContactId || ""] = {
-          timestamp: Date.now(),
+          timestamp: currentTimestamp(),
           form: { ...form, contactId: currentContactId }
         };
         localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
@@ -398,6 +404,7 @@ export const ConsultApp = () => {
       const draft = drafts[currentContactId || ""];
       if (draft) draft.form = savedForm;
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
+      setLocalDrafts(readLocalDrafts());
 
       if (realContactId) {
         const customFields = [
@@ -406,7 +413,7 @@ export const ConsultApp = () => {
           { id: "ABTaAvb2VnrSj8hXmikA", key: "contact.sprinklers__irrigation_present", value: form.sprinklers },
           { id: "R2TZeFEepO9slhM2mFXM", key: "contact.fence_type", value: form.fenceType },
           { id: "DbbvUneMXFCeyBjHlYhe", key: "contact.estimated_linear_feet", value: form.fenceLines.reduce((s, l) => s + (l.linearFeet || 0), 0) },
-          { id: "QX72GsyyIn0yeHlcpFjm", key: "contact.number_of_gates", value: form.gates.walk.qty + form.gates.double.qty },
+          { id: "QX72GsyyIn0yeHlcpFjm", key: "contact.number_of_gates", value: normalizeGateQuantity(form.gates.walk.qty) + normalizeGateQuantity(form.gates.double.qty) },
           { id: "vzdomE51ZkclKdxiCQWf", key: "contact.purpose", value: form.purposes },
           { id: "XQAMEHbh7GTFwOYjzrIx", key: "contact.timeline", value: form.timeline },
           { id: "3PrhuAaSa4yG1sJJ4zq9", key: "contact.yard_sensitivity", value: form.yardSensitivity },
@@ -529,17 +536,17 @@ export const ConsultApp = () => {
             amount: Number(Number(lb.pricePerSection).toFixed(2)),
             currency: "USD"
           })),
-        ...(form.gates.walk.qty > 0 ? [{
+        ...(normalizeGateQuantity(form.gates.walk.qty) > 0 ? [{
           name: "Walk Gate",
           description: "Standard Walk Gate",
-          qty: Number(form.gates.walk.qty),
+          qty: normalizeGateQuantity(form.gates.walk.qty),
           amount: Number(Number(form.gates.walk.price).toFixed(2)),
           currency: "USD"
         }] : []),
-        ...(form.gates.double.qty > 0 ? [{
+        ...(normalizeGateQuantity(form.gates.double.qty) > 0 ? [{
           name: "Double Gate",
           description: "Standard Double Gate",
-          qty: Number(form.gates.double.qty),
+          qty: normalizeGateQuantity(form.gates.double.qty),
           amount: Number(Number(form.gates.double.price).toFixed(2)),
           currency: "USD"
         }] : []),

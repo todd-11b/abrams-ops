@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { notifyRefresh, subscribeToRefresh } from '../lib/dataRefresh';
 import { useActivityLog } from './useActivityLog';
@@ -7,17 +7,26 @@ import type { JobIssue } from '../types/production';
 export function useJobIssues(jobId: string | undefined) {
   const [issues, setIssues] = useState<JobIssue[]>([]);
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(jobId));
+  const active = useRef(true);
+  const requestGeneration = useRef(0);
   const { append } = useActivityLog();
 
-  const load = useCallback(async () => {
-    if (!jobId) return;
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
+    if (!isActive()) return;
+    if (!jobId) {
+      setIssues([]);
+      setPhotoUrls({});
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     const { data, error } = await supabase
       .from('job_issues')
       .select('*')
       .eq('job_id', jobId)
       .order('created_at', { ascending: false });
+    if (!isActive()) return;
     if (error) {
       console.error('[useJobIssues] load failed:', error);
       setIssues([]);
@@ -39,6 +48,7 @@ export function useJobIssues(jobId: string | undefined) {
       .from('job_photos')
       .select('photo_id, url')
       .in('photo_id', ids);
+    if (!isActive()) return;
     if (pErr) {
       console.error('[useJobIssues] photo lookup failed:', pErr);
       setPhotoUrls({});
@@ -60,6 +70,7 @@ export function useJobIssues(jobId: string | undefined) {
       .storage
       .from('job-photos')
       .createSignedUrls(rowsByPath.map((r) => r.path), 3600);
+    if (!isActive()) return;
     if (sErr) {
       console.error('[useJobIssues] signed url mint failed:', sErr);
       setPhotoUrls({});
@@ -76,9 +87,27 @@ export function useJobIssues(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    load();
-    if (!jobId) return;
-    return subscribeToRefresh('job_issues', load);
+    active.current = true;
+    const generation = requestGeneration;
+    let effectActive = true;
+    let initialStarted = false;
+    const refresh = () => {
+      initialStarted = true;
+      const request = ++generation.current;
+      return load(() => effectActive && active.current && request === generation.current);
+    };
+    const start = async () => {
+      await Promise.resolve();
+      if (effectActive && active.current && !initialStarted) await refresh();
+    };
+    void start();
+    const unsubscribe = jobId ? subscribeToRefresh('job_issues', refresh) : undefined;
+    return () => {
+      effectActive = false;
+      active.current = false;
+      generation.current++;
+      unsubscribe?.();
+    };
   }, [jobId, load]);
 
   const resolve = useCallback(async (issueId: string, resolutionNote: string) => {
@@ -97,6 +126,10 @@ export function useJobIssues(jobId: string | undefined) {
 
   const open = issues.filter((i) => !i.resolved);
   const resolved = issues.filter((i) => i.resolved);
+  const reload = useCallback(() => {
+    const request = ++requestGeneration.current;
+    return load(() => active.current && request === requestGeneration.current);
+  }, [load]);
 
-  return { issues, open, resolved, photoUrls, loading, resolve, reload: load };
+  return { issues, open, resolved, photoUrls, loading, resolve, reload };
 }

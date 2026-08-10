@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { ZoomIn, ZoomOut, TreePine, Waves, Zap, Home, StickyNote, Trash2 } from "lucide-react";
-import { ConsultFormData, Obstruction } from "./consultTypes";
+import { ConsultFormData, normalizeGateQuantity, Obstruction } from "./consultTypes";
 
 interface VisualLayoutSectionProps {
   data: ConsultFormData;
@@ -37,12 +37,12 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
     if (hasMissing) {
       onChange({ fenceLines: linesWithPositions });
     }
-  }, [data.fenceLines.length]);
+  }, [data.fenceLines, onChange]);
 
   // Sync gate instances with quantities to ensure they always appear
   useEffect(() => {
-    const walkCount = data.gates.walk.qty || 0;
-    const doubleCount = data.gates.double.qty || 0;
+    const walkCount = normalizeGateQuantity(data.gates.walk.qty);
+    const doubleCount = normalizeGateQuantity(data.gates.double.qty);
 
     const currentWalk = (data.gateInstances || []).filter(g => g.type === "walk");
     const currentDouble = (data.gateInstances || []).filter(g => g.type === "double");
@@ -95,8 +95,11 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
       });
     }
 
-    onChange({ gateInstances: newInstances });
-  }, [data.gates.walk.qty, data.gates.double.qty]);
+    const currentInstances = data.gateInstances || [];
+    const changed = newInstances.length !== currentInstances.length
+      || newInstances.some((gate, index) => gate.id !== currentInstances[index]?.id);
+    if (changed) onChange({ gateInstances: newInstances });
+  }, [data.gates.walk.qty, data.gates.double.qty, data.gateInstances, onChange]);
 
   const addObstruction = (type: Obstruction["type"]) => {
     const newObs: Obstruction = {
@@ -116,7 +119,7 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
 
   const removeGate = (id: string, type: "walk" | "double") => {
     const updatedInstances = (data.gateInstances || []).filter(g => g.id !== id);
-    const updatedQty = Math.max(0, (type === "walk" ? data.gates.walk.qty : data.gates.double.qty) - 1);
+    const updatedQty = Math.max(0, normalizeGateQuantity(type === "walk" ? data.gates.walk.qty : data.gates.double.qty) - 1);
     onChange({
       gateInstances: updatedInstances,
       gates: { ...data.gates, [type]: { ...data.gates[type], qty: updatedQty } }
@@ -387,13 +390,13 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
         {/* Row 2: Gates + Zoom */}
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => onChange({ gates: { ...data.gates, walk: { ...data.gates.walk, qty: data.gates.walk.qty + 1 } } })}
+            onClick={() => onChange({ gates: { ...data.gates, walk: { ...data.gates.walk, qty: normalizeGateQuantity(data.gates.walk.qty) + 1 } } })}
             className="flex-1 flex items-center justify-center gap-1 px-2.5 py-2 bg-green-50 rounded-lg border border-green-200 text-xs font-bold text-green-700 active:bg-green-100 min-h-[40px]"
           >
             + Walk Gate
           </button>
           <button
-            onClick={() => onChange({ gates: { ...data.gates, double: { ...data.gates.double, qty: data.gates.double.qty + 1 } } })}
+            onClick={() => onChange({ gates: { ...data.gates, double: { ...data.gates.double, qty: normalizeGateQuantity(data.gates.double.qty) + 1 } } })}
             className="flex-1 flex items-center justify-center gap-1 px-2.5 py-2 bg-green-50 rounded-lg border border-green-200 text-xs font-bold text-green-700 active:bg-green-100 min-h-[40px]"
           >
             + Double Gate
