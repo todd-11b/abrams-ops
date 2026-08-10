@@ -185,7 +185,7 @@ describe('production data-hook lifecycle', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('prevents an in-flight checklist request from overwriting a replacement job', async () => {
+  it('does not seed a superseded empty checklist before loading the replacement job', async () => {
     const oldChecklist = deferred<typeof queryResult>();
     const newChecklist = deferred<typeof queryResult>();
     const results = [oldChecklist.promise, newChecklist.promise];
@@ -195,7 +195,11 @@ describe('production data-hook lifecycle', () => {
       initialProps: { jobId: 'job-old' },
     });
     await act(async () => { await Promise.resolve(); });
-    rerender({ jobId: 'job-new' });
+
+    act(() => {
+      oldChecklist.resolve({ data: [], error: null });
+      rerender({ jobId: 'job-new' });
+    });
     await act(async () => { await Promise.resolve(); });
 
     await act(async () => {
@@ -205,14 +209,8 @@ describe('production data-hook lifecycle', () => {
       });
       await Promise.resolve();
     });
-    await act(async () => {
-      oldChecklist.resolve({
-        data: [{ item_id: 'old-item', job_id: 'job-old', checked: false }],
-        error: null,
-      });
-      await Promise.resolve();
-    });
 
+    expect(from).toHaveBeenCalledTimes(2);
     expect(result.current.items.map((item) => item.item_id)).toEqual(['new-item']);
     expect(result.current.loading).toBe(false);
   });

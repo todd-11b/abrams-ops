@@ -36,6 +36,7 @@ export function useChecklist(jobId: string | undefined) {
     // First-run hydration: if this job has no checklist rows yet, seed them.
     if (rows.length === 0) {
       const seeds = buildChecklistRowsForJob(jobId);
+      if (!isActive()) return;
       const { data: inserted, error: insErr } = await supabase
         .from('job_checklists')
         .insert(seeds)
