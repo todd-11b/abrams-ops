@@ -60,7 +60,10 @@ export function useChecklist(jobId: string | undefined) {
     setLoading(false);
   }, [jobId]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    const timeoutId = window.setTimeout(load, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [load]);
 
   const persistLocal = useCallback((next: ChecklistItem[]) => {
     if (!jobId) return;

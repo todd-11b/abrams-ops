@@ -32,6 +32,7 @@ import {
 type AppStep = "consult" | "proposal" | "signpay";
 
 const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
+const currentTimestamp = () => Date.now();
 
 const defaultForm = (): ConsultFormData => ({
   contactId: "",
@@ -149,9 +150,12 @@ export const ConsultApp = () => {
   };
 
   useEffect(() => {
-    const draftsObj = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
-    const draftsArr = Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
-    setLocalDrafts(draftsArr);
+    const timeoutId = window.setTimeout(() => {
+      const draftsObj = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
+      const draftsArr = Object.values(draftsObj).sort((a: any, b: any) => (b as any).timestamp - (a as any).timestamp);
+      setLocalDrafts(draftsArr);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
   }, [step, selectedContact]);
 
   useEffect(() => {
@@ -333,13 +337,13 @@ export const ConsultApp = () => {
     try {
       let currentContactId = form.contactId;
       if (!currentContactId) {
-        currentContactId = "local_" + Date.now().toString();
+        currentContactId = "local_" + currentTimestamp().toString();
         updateForm({ contactId: currentContactId });
       }
 
       const drafts = JSON.parse(localStorage.getItem("abrams_drafts") || "{}");
       drafts[currentContactId] = {
-        timestamp: Date.now(),
+        timestamp: currentTimestamp(),
         form: { ...form, contactId: currentContactId }
       };
       localStorage.setItem("abrams_drafts", JSON.stringify(drafts));
@@ -362,7 +366,7 @@ export const ConsultApp = () => {
         delete drafts[currentContactId];
         if (realContactId) currentContactId = realContactId;
         drafts[currentContactId || ""] = {
-          timestamp: Date.now(),
+          timestamp: currentTimestamp(),
           form: { ...form, contactId: currentContactId }
         };
         localStorage.setItem("abrams_drafts", JSON.stringify(drafts));

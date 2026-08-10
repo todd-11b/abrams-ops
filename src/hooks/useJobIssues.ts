@@ -76,9 +76,12 @@ export function useJobIssues(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    load();
-    if (!jobId) return;
-    return subscribeToRefresh('job_issues', load);
+    const timeoutId = window.setTimeout(load, 0);
+    const unsubscribe = jobId ? subscribeToRefresh('job_issues', load) : undefined;
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsubscribe?.();
+    };
   }, [jobId, load]);
 
   const resolve = useCallback(async (issueId: string, resolutionNote: string) => {

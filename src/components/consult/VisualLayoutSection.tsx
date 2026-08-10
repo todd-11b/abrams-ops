@@ -37,7 +37,7 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
     if (hasMissing) {
       onChange({ fenceLines: linesWithPositions });
     }
-  }, [data.fenceLines.length]);
+  }, [data.fenceLines, onChange]);
 
   // Sync gate instances with quantities to ensure they always appear
   useEffect(() => {
@@ -96,7 +96,7 @@ export const VisualLayoutSection: React.FC<VisualLayoutSectionProps> = ({ data, 
     }
 
     onChange({ gateInstances: newInstances });
-  }, [data.gates.walk.qty, data.gates.double.qty]);
+  }, [data.gates.walk.qty, data.gates.double.qty, data.gateInstances, onChange]);
 
   const addObstruction = (type: Obstruction["type"]) => {
     const newObs: Obstruction = {

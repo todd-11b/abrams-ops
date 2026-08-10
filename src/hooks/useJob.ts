@@ -32,9 +32,12 @@ export function useJob(jobId: string | undefined) {
   }, [jobId]);
 
   useEffect(() => {
-    load();
-    if (!jobId) return;
-    return subscribeToRefresh('jobs', load);
+    const timeoutId = window.setTimeout(load, 0);
+    const unsubscribe = jobId ? subscribeToRefresh('jobs', load) : undefined;
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsubscribe?.();
+    };
   }, [jobId, load]);
 
   const setStage = useCallback(async (stage: JobStage) => {

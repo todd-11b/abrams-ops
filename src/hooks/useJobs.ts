@@ -30,8 +30,12 @@ export function useJobs() {
   }, []);
 
   useEffect(() => {
-    load();
-    return subscribeToRefresh('jobs', load);
+    const timeoutId = window.setTimeout(load, 0);
+    const unsubscribe = subscribeToRefresh('jobs', load);
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, [load]);
 
   return { jobs, loading, error, reload: load };

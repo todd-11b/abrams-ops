@@ -23,8 +23,12 @@ export function useOpenIssueCounts() {
   }, []);
 
   useEffect(() => {
-    load();
-    return subscribeToRefresh('job_issues', load);
+    const timeoutId = window.setTimeout(load, 0);
+    const unsubscribe = subscribeToRefresh('job_issues', load);
+    return () => {
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+    };
   }, [load]);
 
   return { countsByJob, reload: load };

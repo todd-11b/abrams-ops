@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 const STORAGE_KEY = 'abrams_production_view';
 export type ProductionView = 'office' | 'field';
@@ -9,12 +9,10 @@ function detectDefault(): ProductionView {
 }
 
 export function useProductionView(): [ProductionView, (v: ProductionView) => void] {
-  const [view, setView] = useState<ProductionView>('office');
-  useEffect(() => {
+  const [view, setView] = useState<ProductionView>(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored === 'office' || stored === 'field') setView(stored);
-    else setView(detectDefault());
-  }, []);
+    return stored === 'office' || stored === 'field' ? stored : detectDefault();
+  });
   const update = (next: ProductionView) => {
     setView(next);
     localStorage.setItem(STORAGE_KEY, next);
