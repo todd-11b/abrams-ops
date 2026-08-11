@@ -30,11 +30,6 @@ interface LocalDraft {
   form: ConsultFormData;
 }
 
-interface PipelineRecord {
-  id?: string;
-  stages?: Array<{ id?: string; name?: string }>;
-}
-
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -736,16 +731,10 @@ export const ConsultApp = () => {
       });
 
       if (form.opportunityId) {
-        // Find the stage ID for "Proposal Sent" by calling getPipelines in the background
-        crmApi.getPipelines().then((response: unknown) => {
-          if (!isRecord(response) || !Array.isArray(response.pipelines)) return;
-          const pipelines = response.pipelines.filter((value: unknown): value is PipelineRecord => isRecord(value));
-          const pipeline = pipelines.find((value) => value.id === SALES_PIPELINE_ID);
-          const stage = pipeline?.stages?.find((value) => value.name === "Proposal Sent");
-          if (stage) {
-            crmApi.updateOpportunityStatus(form.opportunityId, "open", stage.id);
-          }
-        }).catch(err => console.error("Failed to fetch pipeline stages", err));
+        // The browser names only the business transition. The server owns the
+        // Sales pipeline/stage ID and validates parentage before forwarding it.
+        crmApi.moveSalesOpportunityToStage(form.opportunityId, "proposal_sent")
+          .catch(err => console.error("Failed to move proposal to Proposal Sent", err));
       }
 
       setForm((prev) => ({

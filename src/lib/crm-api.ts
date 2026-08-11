@@ -4,6 +4,7 @@ interface CreateContactInput { firstName: string; lastName: string; phone?: stri
 interface UpdateContactPayload { address1?: string; customFields?: Array<{ id?: string; key?: string; value: unknown }>; [key: string]: unknown }
 interface CreateOpportunityInput { contactId: string; pipelineId: string; name: string; monetaryValue?: number }
 type ProductionStage = 'job_created' | 'scheduled' | 'in_install' | 'job_complete';
+type SalesStage = 'proposal_sent';
 
 async function action(name: string, payload: Record<string, unknown> = {}) {
   const res = await operatorFetch('/api/operator/ghl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: name, ...payload }) });
@@ -19,7 +20,8 @@ export const crmApi = {
   updateContact: (contactId: string, payload: UpdateContactPayload) => action('updateContact', { contactId, payload }),
   addNote: (contactId: string, body: string) => action('addNote', { contactId, body }),
   addTags: (contactId: string, tags: string[]) => action('addTags', { contactId, tags }),
-  updateOpportunityStatus: (opportunityId: string, status: string, pipelineStageId?: string) => action('updateOpportunityStatus', { opportunityId, status, pipelineStageId }),
+  updateOpportunityStatus: (opportunityId: string, status: string) => action('updateOpportunityStatus', { opportunityId, status }),
+  moveSalesOpportunityToStage: (opportunityId: string, stage: SalesStage) => action('moveSalesOpportunityToStage', { opportunityId, stage }),
   createOpportunity: (input: CreateOpportunityInput) => action('createOpportunity', { ...input }),
   updateOpportunityValue: (opportunityId: string, monetaryValue: number) => action('updateOpportunityValue', { opportunityId, monetaryValue }),
   getPipelines: () => action('getPipelines'),

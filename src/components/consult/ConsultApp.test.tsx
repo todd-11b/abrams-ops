@@ -11,6 +11,7 @@ const crmApi = vi.hoisted(() => ({
   updateContact: vi.fn(async () => ({})),
   updateOpportunityValue: vi.fn(async () => ({})),
   updateOpportunityStatus: vi.fn(async () => ({})),
+  moveSalesOpportunityToStage: vi.fn(async () => ({})),
   addTags: vi.fn(async () => ({})),
   addNote: vi.fn(async () => ({})),
   uploadPhoto: vi.fn(async () => ({})),

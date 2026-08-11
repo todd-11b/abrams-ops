@@ -10,6 +10,7 @@ const requiredServer = [
   'GHL_TODD_CONTACT_ID',
   'GHL_SALES_PIPELINE_ID',
   'GHL_SALES_PIPELINE_STAGE_ID',
+  'GHL_SALES_STAGE_PROPOSAL_SENT',
   'GHL_PRODUCTION_PIPELINE_ID',
   'GHL_STAGE_JOB_CREATED',
   'GHL_STAGE_SCHEDULED',
@@ -91,6 +92,7 @@ const client = files.map((file) => fs.readFileSync(`src/${file}`, 'utf8')).join(
 if (/VITE_GHL_API_KEY/.test(client)) throw new Error('browser GHL secret reference remains');
 if (/createClient\s*\(/.test(client)) throw new Error('browser Supabase client remains');
 if (/\bsendSms\b|conversations\/messages/.test(client)) throw new Error('browser SMS action remains');
+if (/updateOpportunityStatus\([^)]*,[^)]*,/.test(client) || /pipelineStageId/.test(client)) throw new Error('browser-supplied raw stage routing remains');
 const additive = fs.readFileSync('supabase/migrations/20260801000000_operator_containment.sql', 'utf8');
 if (!additive.includes('consume_operator_login_attempt') || !additive.includes("interval '15 minutes'") || !additive.includes("interval '24 hours'") || !additive.includes('failed_attempts + 1 >= 5')) throw new Error('durable login throttling is missing');
 for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create_job_from_proposal_token(text,jsonb)']) {

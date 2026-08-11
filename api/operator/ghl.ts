@@ -16,8 +16,8 @@ function onlyKeys(value: unknown, keys: string[]): Record<string, unknown> | nul
  * Validates that the configured Sales opening stage is actually parented by
  * the configured Sales pipeline. No browser pipeline/stage fallback is allowed.
  */
-async function openingStageId(pipelineId: string, apiKey: string, locationId: string): Promise<string | null> {
-  const configured = id(process.env.GHL_SALES_PIPELINE_STAGE_ID);
+async function configuredPipelineStageId(pipelineId: string, configuredValue: unknown, apiKey: string, locationId: string): Promise<string | null> {
+  const configured = id(configuredValue);
   if (!configured) return null;
   try {
     const response = await fetch(`${BASE}/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: '2021-07-28' } });
@@ -39,6 +39,7 @@ export default async function handler(req: Request) {
   if (contentType.includes('multipart/form-data')) {
     const fd = await req.formData(); body = { action: fd.get('action'), contactId: fd.get('contactId') }; upload = fd.get('file') as File | null;
   } else { try { body = await req.json(); } catch { return secureJson({ error: 'invalid JSON' }, { status: 400 }); } }
+  if (Object.hasOwn(body, 'pipelineStageId')) return secureJson({ error: 'raw pipeline stage identifiers are not accepted' }, { status: 400 });
   const permission = body.action === 'sendSms' ? 'ghl:send-message' : ['fetchContacts', 'searchContacts', 'getPipelines'].includes(String(body.action)) ? 'ghl:broad-read' : 'ghl:standard';
   if (!canOperator(operator, permission)) return secureJson({ error: 'forbidden' }, { status: 403 });
   let path = ''; let method = 'GET'; let payload: unknown; let multipart: FormData | undefined;
@@ -60,7 +61,7 @@ export default async function handler(req: Request) {
       const monetaryValue = body.monetaryValue;
       if (!contactId || !pipelineId || !name || name.length > 200) break;
       if (monetaryValue !== undefined && (typeof monetaryValue !== 'number' || !Number.isFinite(monetaryValue) || monetaryValue < 0)) break;
-      const stageId = await openingStageId(pipelineId, apiKey, locationId);
+      const stageId = await configuredPipelineStageId(pipelineId, process.env.GHL_SALES_PIPELINE_STAGE_ID, apiKey, locationId);
       if (!stageId) break;
       path = '/opportunities/'; method = 'POST';
       payload = { pipelineId, locationId, contactId, name, status: 'open', ...(stageId ? { pipelineStageId: stageId } : {}), ...(monetaryValue === undefined ? {} : { monetaryValue }) };
@@ -68,7 +69,16 @@ export default async function handler(req: Request) {
     }
     case 'updateOpportunityValue': { const value = Number(body.monetaryValue); if (!opportunityId || !Number.isFinite(value) || value < 0 || value > 10_000_000) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { monetaryValue: value }; break; }
     case 'getPipelines': path = `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`; break;
-    case 'updateOpportunityStatus': if (!opportunityId || typeof body.status !== 'string' || (body.pipelineStageId && !id(body.pipelineStageId))) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status, ...(body.pipelineStageId ? { pipelineStageId: body.pipelineStageId } : {}) }; break;
+    case 'updateOpportunityStatus':
+      if (!opportunityId || typeof body.status !== 'string') break;
+      path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status }; break;
+    case 'moveSalesOpportunityToStage': {
+      const pipelineId = id(process.env.GHL_SALES_PIPELINE_ID);
+      if (!opportunityId || body.stage !== 'proposal_sent' || !pipelineId) break;
+      const pipelineStageId = await configuredPipelineStageId(pipelineId, process.env.GHL_SALES_STAGE_PROPOSAL_SENT, apiKey, locationId);
+      if (!pipelineStageId) break;
+      path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: 'open', pipelineStageId }; break;
+    }
     case 'moveOpportunityToStage': {
       const stage = typeof body.stage === 'string' && ['job_created','scheduled','in_install','job_complete'].includes(body.stage)
         ? body.stage as ProductionStage : null;
