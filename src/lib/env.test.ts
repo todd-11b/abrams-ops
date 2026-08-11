@@ -36,6 +36,21 @@ describe('validateProductionEnv', () => {
     expect(cfg.toddContactId).toBe('ExampleContactId12345');
   });
 
+  it('returns config without owner contact routing when the optional id is absent', () => {
+    const withoutContactId: Partial<typeof VALID> = { ...VALID };
+    delete withoutContactId.VITE_GHL_TODD_CONTACT_ID;
+    const cfg = validateProductionEnv(withoutContactId);
+
+    expect(cfg.pipelineId).toBe('p1');
+    expect(cfg.toddContactId).toBeUndefined();
+  });
+
+  it('treats a whitespace-only optional owner contact id as disabled', () => {
+    const cfg = validateProductionEnv({ ...VALID, VITE_GHL_TODD_CONTACT_ID: '   ' });
+
+    expect(cfg.toddContactId).toBeUndefined();
+  });
+
   it('throws when a required var is whitespace-only', () => {
     expect(() =>
       validateProductionEnv({ ...VALID, VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID: '   ' })
