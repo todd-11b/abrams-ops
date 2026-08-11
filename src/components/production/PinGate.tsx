@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { signInWithPin } from '../../utils/actor';
+import { useEffect, useRef, useState } from 'react';
+import { isEmbedded, signInWithGhlSso, signInWithPin } from '../../utils/actor';
 import type { Actor } from '../../types/production';
 
 interface Props {
@@ -10,6 +10,23 @@ export function ProductionPinGate({ onUnlock }: Props) {
   const [pin, setPin] = useState('');
   const [error, setError] = useState(false);
   const [shake, setShake] = useState(false);
+  // Inside HighLevel the dashboard identifies the operator, so no PIN is asked for.
+  const [resolvingSso, setResolvingSso] = useState(isEmbedded());
+  const onUnlockRef = useRef(onUnlock);
+  useEffect(() => { onUnlockRef.current = onUnlock; }, [onUnlock]);
+
+  useEffect(() => {
+    if (!isEmbedded()) return;
+    let active = true;
+    void signInWithGhlSso()
+      .catch(() => null)
+      .then((actor) => {
+        if (!active) return;
+        setResolvingSso(false);
+        if (actor) onUnlockRef.current(actor);
+      });
+    return () => { active = false; };
+  }, []);
 
   const submit = async (next: string) => {
     try {
@@ -40,7 +57,9 @@ export function ProductionPinGate({ onUnlock }: Props) {
         alt="Abrams Fence Co."
         className="h-14 mb-8 object-contain"
       />
-      <p className="text-white/60 text-sm font-sans mb-8 tracking-widest uppercase">Production — Enter PIN</p>
+      <p className="text-white/60 text-sm font-sans mb-8 tracking-widest uppercase">
+        {resolvingSso ? 'Signing in…' : 'Production — Enter PIN'}
+      </p>
       <div className={`flex gap-4 mb-10 ${shake ? 'animate-[wiggle_0.4s_ease-in-out]' : ''}`}>
         {dots.map((filled, i) => (
           <div key={i} className={`w-4 h-4 rounded-full border-2 transition-all duration-150 ${

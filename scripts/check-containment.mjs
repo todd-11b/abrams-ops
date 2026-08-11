@@ -18,6 +18,9 @@ const requiredServer = [
 ];
 const optionalServer = [
   'OPERATOR_SESSION_VERSION',
+  'GHL_APP_SHARED_SECRET',
+  'GHL_SSO_TODD_USER_ID',
+  'GHL_SSO_TY_USER_ID',
   'GHL_OUTBOUND_IP_PREFIXES',
   'GHL_SALES_PIPELINE_ID',
   'GHL_SALES_PIPELINE_STAGE_ID',
@@ -105,6 +108,12 @@ if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw 
 const cronRoute = fs.readFileSync('api/cron/blocked-jobs.ts', 'utf8');
 if (!cronRoute.includes('`Bearer ${secret}`') || !cronRoute.includes('!secret ||')) throw new Error('the scheduled sweep is not gated on a configured cron secret');
 if (!cronRoute.includes('secretMatches(')) throw new Error('the cron secret is not compared in constant time');
+const ssoRoute = fs.readFileSync('api/operator/sso.ts', 'utf8');
+if (!ssoRoute.includes('parseGhlSsoConfig()')) throw new Error('the SSO route does not fail closed on an unconfigured shared secret');
+if (!ssoRoute.includes('consumeLoginAttempt(')) throw new Error('the SSO route is not rate limited');
+const ssoLib = fs.readFileSync('api/_lib/ghl-sso.ts', 'utf8');
+if (!ssoLib.includes('context.activeLocation !== config.location')) throw new Error('SSO accepts a HighLevel session from another location');
+if (!/GHL_APP_SHARED_SECRET/.test(ssoLib) || /GHL_APP_SHARED_SECRET/.test(client)) throw new Error('the HighLevel shared secret is not server-only');
 const restrictive = fs.readFileSync('supabase/migrations/20260801000001_operator_containment_restrict.sql', 'utf8');
 if (!restrictive.includes('REVOKE ALL ON jobs') || /CREATE POLICY\s+\w+\s+ON\s+\w+\s+FOR ALL\s+TO public\s+USING \(true\)/i.test(restrictive)) throw new Error('containment migration is permissive');
 const rollback = fs.readFileSync('supabase/rollback/20260801000002_operator_containment_rollback.sql', 'utf8');

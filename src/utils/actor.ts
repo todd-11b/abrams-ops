@@ -41,6 +41,45 @@ export async function signInWithPin(pin: string): Promise<Actor> {
   return body.actor;
 }
 
+/** True only when the app is running inside another site's frame, i.e. HighLevel. */
+export function isEmbedded(): boolean {
+  try { return window.parent !== window.self; } catch { return true; }
+}
+
+/**
+ * Asks the embedding HighLevel window for the encrypted user context it hands
+ * apps, then trades it for an operator session. Resolves to null whenever the
+ * app is not embedded or HighLevel does not answer, so the PIN gate still shows.
+ */
+export async function signInWithGhlSso(timeoutMs = 3000): Promise<Actor | null> {
+  if (!isEmbedded()) return null;
+  const encryptedData = await new Promise<unknown>((resolve) => {
+    const onMessage = ({ data }: MessageEvent) => {
+      if (data?.message !== 'REQUEST_USER_DATA_RESPONSE') return;
+      window.removeEventListener('message', onMessage);
+      clearTimeout(timer);
+      resolve(data.payload);
+    };
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      resolve(null);
+    }, timeoutMs);
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ message: 'REQUEST_USER_DATA' }, '*');
+  });
+  if (typeof encryptedData !== 'string' || !encryptedData) return null;
+
+  const res = await fetch('/api/operator/sso', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ encryptedData }),
+  });
+  if (!res.ok) return null;
+  const body = await res.json() as { token: string; actor: Actor; expires_at: number };
+  storeOperatorSession({ token: body.token, actor: body.actor, expiresAt: body.expires_at });
+  return body.actor;
+}
+
 export function clearStoredActor(): void {
   const hadSession = sessionStorage.getItem(SESSION_KEY) !== null;
   sessionStorage.removeItem(SESSION_KEY);
