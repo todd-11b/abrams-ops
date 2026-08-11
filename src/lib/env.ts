@@ -6,7 +6,7 @@ export interface ProductionEnvConfig {
     in_install: string;
     job_complete: string;
   };
-  toddContactId: string;
+  toddContactId?: string;
 }
 
 interface RawEnv extends Record<string, string | undefined> {
@@ -24,7 +24,6 @@ const REQUIRED_KEYS: Array<keyof RawEnv> = [
   'VITE_GHL_STAGE_SCHEDULED',
   'VITE_GHL_STAGE_IN_INSTALL',
   'VITE_GHL_STAGE_JOB_COMPLETE',
-  'VITE_GHL_TODD_CONTACT_ID',
 ];
 
 export function validateProductionEnv(env: RawEnv): ProductionEnvConfig {
@@ -36,7 +35,8 @@ export function validateProductionEnv(env: RawEnv): ProductionEnvConfig {
     );
   }
   // GHL v2 contact IDs are short alphanumeric tokens (e.g. ExampleContactId12345).
-  if (!/^[A-Za-z0-9]{16,32}$/.test(env.VITE_GHL_TODD_CONTACT_ID!)) {
+  const toddContactId = env.VITE_GHL_TODD_CONTACT_ID?.trim() || undefined;
+  if (toddContactId && !/^[A-Za-z0-9]{16,32}$/.test(toddContactId)) {
     throw new Error(
       `VITE_GHL_TODD_CONTACT_ID must be a GHL contact id (alphanumeric, 16–32 chars). Got: ${env.VITE_GHL_TODD_CONTACT_ID}`
     );
@@ -49,7 +49,7 @@ export function validateProductionEnv(env: RawEnv): ProductionEnvConfig {
       in_install: env.VITE_GHL_STAGE_IN_INSTALL!,
       job_complete: env.VITE_GHL_STAGE_JOB_COMPLETE!,
     },
-    toddContactId: env.VITE_GHL_TODD_CONTACT_ID!,
+    toddContactId,
   };
 }
 

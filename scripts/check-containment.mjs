@@ -29,6 +29,8 @@ const requiredPublic = [
   'VITE_GHL_STAGE_SCHEDULED',
   'VITE_GHL_STAGE_IN_INSTALL',
   'VITE_GHL_STAGE_JOB_COMPLETE',
+];
+const optionalPublic = [
   'VITE_GHL_TODD_CONTACT_ID',
 ];
 const obsoleteBrowser = [
@@ -42,7 +44,7 @@ const obsoleteBrowser = [
 const envExample = fs.readFileSync('.env.example', 'utf8');
 const assignments = [...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
 const actualNames = assignments.map((match) => match[1]);
-const expectedNames = [...requiredPublic, ...requiredServer, ...optionalServer];
+const expectedNames = [...requiredPublic, ...optionalPublic, ...requiredServer, ...optionalServer];
 if (new Set(actualNames).size !== actualNames.length) throw new Error('.env.example contains duplicate names');
 if (actualNames.length !== expectedNames.length || expectedNames.some((name) => !actualNames.includes(name))) {
   throw new Error('.env.example names do not match the source contract');
@@ -85,6 +87,7 @@ const files = fs.readdirSync('src', { recursive: true }).filter((file) => typeof
 const client = files.map((file) => fs.readFileSync(`src/${file}`, 'utf8')).join('\n');
 if (/VITE_GHL_API_KEY/.test(client)) throw new Error('browser GHL secret reference remains');
 if (/createClient\s*\(/.test(client)) throw new Error('browser Supabase client remains');
+if (/\bsendSms\b|conversations\/messages/.test(client)) throw new Error('browser SMS action remains');
 const additive = fs.readFileSync('supabase/migrations/20260801000000_operator_containment.sql', 'utf8');
 if (!additive.includes('consume_operator_login_attempt') || !additive.includes("interval '15 minutes'") || !additive.includes("interval '24 hours'") || !additive.includes('failed_attempts + 1 >= 5')) throw new Error('durable login throttling is missing');
 for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create_job_from_proposal_token(text,jsonb)']) {
