@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { canOperator, requireOperator, secureJson } from '../_lib/operator-auth';
+import { productionStageRouting, type ProductionStage } from '../_lib/production-opportunity';
 
 export const config = { runtime: 'edge' };
 const BASE = 'https://services.leadconnectorhq.com';
@@ -12,18 +13,18 @@ function onlyKeys(value: unknown, keys: string[]): Record<string, unknown> | nul
 }
 
 /**
- * The stage a new consult opportunity opens in. `GHL_SALES_PIPELINE_STAGE_ID`
- * pins it; otherwise it is resolved to the pipeline's first stage so the
- * placement is explicit in the request rather than left to a CRM default.
+ * Validates that the configured Sales opening stage is actually parented by
+ * the configured Sales pipeline. No browser pipeline/stage fallback is allowed.
  */
 async function openingStageId(pipelineId: string, apiKey: string, locationId: string): Promise<string | null> {
   const configured = id(process.env.GHL_SALES_PIPELINE_STAGE_ID);
-  if (configured) return configured;
+  if (!configured) return null;
   try {
     const response = await fetch(`${BASE}/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: '2021-07-28' } });
     if (!response.ok) return null;
     const payload = await response.json() as { pipelines?: Array<{ id?: string; stages?: Array<{ id?: string }> }> };
-    return id(payload.pipelines?.find((pipeline) => pipeline.id === pipelineId)?.stages?.[0]?.id);
+    const pipeline = payload.pipelines?.find((candidate) => candidate.id === pipelineId);
+    return pipeline?.stages?.some((stage) => stage.id === configured) ? configured : null;
   } catch { return null; }
 }
 
@@ -55,11 +56,12 @@ export default async function handler(req: Request) {
     case 'createOpportunity': {
       // The server's configured pipeline wins over the browser's, so a stale
       // client cannot open opportunities in the wrong pipeline.
-      const pipelineId = id(process.env.GHL_SALES_PIPELINE_ID) ?? id(body.pipelineId); const name = typeof body.name === 'string' ? body.name.trim() : '';
+      const pipelineId = id(process.env.GHL_SALES_PIPELINE_ID); const name = typeof body.name === 'string' ? body.name.trim() : '';
       const monetaryValue = body.monetaryValue;
       if (!contactId || !pipelineId || !name || name.length > 200) break;
       if (monetaryValue !== undefined && (typeof monetaryValue !== 'number' || !Number.isFinite(monetaryValue) || monetaryValue < 0)) break;
       const stageId = await openingStageId(pipelineId, apiKey, locationId);
+      if (!stageId) break;
       path = '/opportunities/'; method = 'POST';
       payload = { pipelineId, locationId, contactId, name, status: 'open', ...(stageId ? { pipelineStageId: stageId } : {}), ...(monetaryValue === undefined ? {} : { monetaryValue }) };
       break;
@@ -67,7 +69,14 @@ export default async function handler(req: Request) {
     case 'updateOpportunityValue': { const value = Number(body.monetaryValue); if (!opportunityId || !Number.isFinite(value) || value < 0 || value > 10_000_000) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { monetaryValue: value }; break; }
     case 'getPipelines': path = `/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`; break;
     case 'updateOpportunityStatus': if (!opportunityId || typeof body.status !== 'string' || (body.pipelineStageId && !id(body.pipelineStageId))) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status, ...(body.pipelineStageId ? { pipelineStageId: body.pipelineStageId } : {}) }; break;
-    case 'moveOpportunityToStage': if (!opportunityId || !id(body.pipelineStageId)) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { pipelineStageId: body.pipelineStageId }; break;
+    case 'moveOpportunityToStage': {
+      const stage = typeof body.stage === 'string' && ['job_created','scheduled','in_install','job_complete'].includes(body.stage)
+        ? body.stage as ProductionStage : null;
+      if (!opportunityId || !stage) break;
+      let pipelineStageId: string;
+      try { pipelineStageId = productionStageRouting(stage); } catch { break; }
+      path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { pipelineStageId }; break;
+    }
     case 'sendSms': if (!contactId || typeof body.body !== 'string' || body.body.length > 1600) break; path = '/conversations/messages'; method = 'POST'; payload = { type: 'SMS', contactId, message: body.body }; break;
     case 'uploadPhoto': if (!contactId || !upload) break; path = '/medias/upload-file'; method = 'POST'; multipart = new FormData(); multipart.append('file', upload); multipart.append('locationId', locationId); multipart.append('hosted', 'false'); multipart.append('name', `contact-${contactId}-${Date.now()}-${upload.name}`); break;
   }

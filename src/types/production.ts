@@ -34,12 +34,16 @@ export type IssueSeverity = 'low' | 'medium' | 'high';
 export type ActivitySource = 'manual' | 'workflow' | 'system';
 
 export type Actor = 'todd' | 'ty';
+export type OpportunityContract = 'legacy_single_v1' | 'separate_v1';
 
 export interface Job {
   job_id: string;
   job_number: string;
   contact_id: string;
   proposal_id: string | null;
+  sales_opportunity_id: string | null;
+  production_opportunity_id: string | null;
+  opportunity_contract: OpportunityContract;
   stage: JobStage;
   status: JobStatus;
   install_date: string | null;

@@ -3,6 +3,7 @@ import { operatorFetch } from '../utils/actor';
 interface CreateContactInput { firstName: string; lastName: string; phone?: string; email?: string }
 interface UpdateContactPayload { address1?: string; customFields?: Array<{ id?: string; key?: string; value: unknown }>; [key: string]: unknown }
 interface CreateOpportunityInput { contactId: string; pipelineId: string; name: string; monetaryValue?: number }
+type ProductionStage = 'job_created' | 'scheduled' | 'in_install' | 'job_complete';
 
 async function action(name: string, payload: Record<string, unknown> = {}) {
   const res = await operatorFetch('/api/operator/ghl', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: name, ...payload }) });
@@ -22,7 +23,7 @@ export const crmApi = {
   createOpportunity: (input: CreateOpportunityInput) => action('createOpportunity', { ...input }),
   updateOpportunityValue: (opportunityId: string, monetaryValue: number) => action('updateOpportunityValue', { opportunityId, monetaryValue }),
   getPipelines: () => action('getPipelines'),
-  moveOpportunityToStage: (opportunityId: string, pipelineStageId: string) => action('moveOpportunityToStage', { opportunityId, pipelineStageId }),
+  moveOpportunityToStage: (opportunityId: string, stage: ProductionStage) => action('moveOpportunityToStage', { opportunityId, stage }),
   async uploadPhoto(contactId: string, file: File) {
     const data = new FormData(); data.append('action', 'uploadPhoto'); data.append('contactId', contactId); data.append('file', file);
     const res = await operatorFetch('/api/operator/ghl', { method: 'POST', body: data });

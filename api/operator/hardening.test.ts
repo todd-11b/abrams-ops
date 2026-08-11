@@ -47,7 +47,7 @@ describe('new consult opportunities', () => {
   it('opens in an explicit stage of the server-configured pipeline', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     process.env.GHL_SALES_PIPELINE_ID = 'server-pipeline';
-    delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
+    process.env.GHL_SALES_PIPELINE_STAGE_ID = 'stage-consult';
     const created: Array<Record<string, unknown>> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       if (String(input).includes('/pipelines')) {
@@ -63,21 +63,17 @@ describe('new consult opportunities', () => {
     expect(created[0]).toMatchObject({ pipelineId: 'server-pipeline', pipelineStageId: 'stage-consult', status: 'open' });
   });
 
-  it('falls back to the client pipeline and omits the stage when neither can be resolved', async () => {
+  it('fails closed rather than falling back to a browser-supplied pipeline', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     delete process.env.GHL_SALES_PIPELINE_ID;
     delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
-    const created: Array<Record<string, unknown>> = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).includes('/pipelines')) return new Response('nope', { status: 500 });
-      created.push(JSON.parse(String(init?.body)));
-      return new Response('{}', { status: 200 });
-    }));
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
 
-    await post(ghlHandler, '/api/operator/ghl', token, { action: 'createOpportunity', contactId: 'c1', pipelineId: 'client-pipeline', name: 'Customer — P-1' });
+    const response = await post(ghlHandler, '/api/operator/ghl', token, { action: 'createOpportunity', contactId: 'c1', pipelineId: 'client-pipeline', name: 'Customer — P-1' });
 
-    expect(created[0]).toMatchObject({ pipelineId: 'client-pipeline' });
-    expect(created[0]).not.toHaveProperty('pipelineStageId');
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('re-prices an existing opportunity with a bounded numeric value', async () => {

@@ -8,7 +8,12 @@ const requiredServer = [
   'GHL_LOCATION_ID',
   'GHL_WEBHOOK_SECRET',
   'GHL_TODD_CONTACT_ID',
+  'GHL_SALES_PIPELINE_ID',
+  'GHL_SALES_PIPELINE_STAGE_ID',
+  'GHL_PRODUCTION_PIPELINE_ID',
   'GHL_STAGE_JOB_CREATED',
+  'GHL_STAGE_SCHEDULED',
+  'GHL_STAGE_IN_INSTALL',
   'GHL_STAGE_JOB_COMPLETE',
   'OPERATOR_SESSION_SECRET',
   'OPERATOR_TODD_PIN',
@@ -19,8 +24,6 @@ const requiredServer = [
 const optionalServer = [
   'OPERATOR_SESSION_VERSION',
   'GHL_OUTBOUND_IP_PREFIXES',
-  'GHL_SALES_PIPELINE_ID',
-  'GHL_SALES_PIPELINE_STAGE_ID',
   'GHL_BUSINESS_NAME',
 ];
 const requiredPublic = [
@@ -102,6 +105,23 @@ if (!deposits.includes('REVOKE ALL ON FUNCTION create_job_from_deposit_draft(tex
   throw new Error('deposit draft RPC grants are not service-role only');
 }
 if (!deposits.includes('deposit_invoice_drafts_live_proposal')) throw new Error('deposit drafts allow more than one live price per opportunity');
+const opportunityBoundary = fs.readFileSync('supabase/migrations/20260811051345_separate_production_opportunity.sql', 'utf8');
+for (const signature of [
+  'claim_production_opportunity(text,text,text,text,text,text)',
+  'mark_production_opportunity_attempted(text,text)',
+  'finalize_production_opportunity(text,text,text)',
+  'release_unattempted_production_claim(text,text)',
+]) {
+  if (!opportunityBoundary.includes(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, anon, authenticated;`)) throw new Error(`public Production RPC revoke missing: ${signature}`);
+  if (!opportunityBoundary.includes(`GRANT EXECUTE ON FUNCTION ${signature} TO service_role;`)) throw new Error(`service-role Production RPC grant missing: ${signature}`);
+}
+if (!opportunityBoundary.includes("opportunity_contract = 'legacy_single_v1'") ||
+    !opportunityBoundary.includes("opportunity_contract = 'separate_v1'")) {
+  throw new Error('legacy/new opportunity compatibility contract is missing');
+}
+if (!opportunityBoundary.includes('create_attempted_at') || !opportunityBoundary.includes("'reconcile'")) {
+  throw new Error('ambiguous Production creation is not reconciliation-only');
+}
 const invoiceRoute = fs.readFileSync('api/operator/invoice.ts', 'utf8');
 if (/invoices\/[^`'"]*\/send/.test(invoiceRoute)) throw new Error('the invoice route sends rather than drafts');
 if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw new Error('the invoice route is not owner-gated');
