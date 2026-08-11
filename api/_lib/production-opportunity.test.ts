@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ensureProductionOpportunity } from './production-opportunity';
 
 const SALES = 'sales-pipeline';
-const SALES_STAGE = 'sales-stage';
 const PRODUCTION = 'production-pipeline';
 const PRODUCTION_STAGE = 'production-stage';
 
@@ -13,7 +12,8 @@ beforeEach(() => {
   process.env.GHL_API_KEY = 'ghl';
   process.env.GHL_LOCATION_ID = 'sandbox-location';
   process.env.GHL_SALES_PIPELINE_ID = SALES;
-  process.env.GHL_SALES_PIPELINE_STAGE_ID = SALES_STAGE;
+  delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
+  delete process.env.GHL_SALES_STAGE_PROPOSAL_SENT;
   process.env.GHL_PRODUCTION_PIPELINE_ID = PRODUCTION;
   process.env.GHL_STAGE_JOB_CREATED = PRODUCTION_STAGE;
   process.env.GHL_STAGE_SCHEDULED = 'production-scheduled';
@@ -28,13 +28,15 @@ beforeEach(() => {
 
 function pipelines() {
   return new Response(JSON.stringify({ pipelines: [
-    { id: SALES, stages: [{ id: SALES_STAGE }] },
+    { id: SALES, stages: [{ id: 'sales-first-stage' }] },
     { id: PRODUCTION, stages: [{ id: PRODUCTION_STAGE }, { id: 'production-scheduled' }, { id: 'production-install' }, { id: 'production-complete' }] },
   ] }), { status: 200 });
 }
 
 describe('Production opportunity boundary', () => {
   it('creates and finalizes exactly one distinct Production opportunity', async () => {
+    expect(process.env.GHL_SALES_PIPELINE_STAGE_ID).toBeUndefined();
+    expect(process.env.GHL_SALES_STAGE_PROPOSAL_SENT).toBeUndefined();
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input); calls.push({ url, init });
@@ -93,6 +95,12 @@ describe('Production opportunity boundary', () => {
   });
 
   it('fails closed for equal pipelines or wrong stage parentage', async () => {
+    delete process.env.GHL_SALES_PIPELINE_ID;
+    const missingSalesFetch = vi.fn(); vi.stubGlobal('fetch', missingSalesFetch);
+    await expect(ensureProductionOpportunity({ contactId: 'contact-1', salesOpportunityId: 'sales-opp' })).rejects.toThrow('GHL_SALES_PIPELINE_ID');
+    expect(missingSalesFetch).not.toHaveBeenCalled();
+
+    process.env.GHL_SALES_PIPELINE_ID = SALES;
     process.env.GHL_PRODUCTION_PIPELINE_ID = SALES;
     process.env.VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID = SALES;
     const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
@@ -102,8 +110,16 @@ describe('Production opportunity boundary', () => {
     process.env.GHL_PRODUCTION_PIPELINE_ID = PRODUCTION;
     process.env.VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID = PRODUCTION;
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ pipelines: [
-      { id: SALES, stages: [{ id: SALES_STAGE }] }, { id: PRODUCTION, stages: [{ id: 'wrong-stage' }] },
+      { id: SALES, stages: [{ id: 'sales-first-stage' }] }, { id: PRODUCTION, stages: [{ id: 'wrong-stage' }] },
     ] }), { status: 200 })));
     await expect(ensureProductionOpportunity({ contactId: 'contact-1', salesOpportunityId: 'sales-opp' })).rejects.toThrow('not in the Production pipeline');
+  });
+
+  it('fails closed when the configured Sales pipeline does not exist', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ pipelines: [
+      { id: PRODUCTION, stages: [{ id: PRODUCTION_STAGE }, { id: 'production-scheduled' }, { id: 'production-install' }, { id: 'production-complete' }] },
+    ] }), { status: 200 })));
+
+    await expect(ensureProductionOpportunity({ contactId: 'contact-1', salesOpportunityId: 'sales-opp' })).rejects.toThrow('Sales pipeline does not exist');
   });
 });

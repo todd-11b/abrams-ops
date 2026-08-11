@@ -16,7 +16,6 @@ beforeEach(() => {
   process.env.GHL_API_KEY = 'test-ghl-key';
   process.env.GHL_LOCATION_ID = 'test-loc';
   process.env.GHL_SALES_PIPELINE_ID = 'sales-pipeline';
-  process.env.GHL_SALES_PIPELINE_STAGE_ID = 'sales-stage';
   process.env.GHL_PRODUCTION_PIPELINE_ID = 'production-pipeline';
   process.env.GHL_STAGE_JOB_CREATED = 'stage-jc';
   process.env.GHL_STAGE_SCHEDULED = 'stage-scheduled';

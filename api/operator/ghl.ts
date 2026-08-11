@@ -12,19 +12,14 @@ function onlyKeys(value: unknown, keys: string[]): Record<string, unknown> | nul
   return candidate && Object.keys(candidate).every((key) => keys.includes(key)) ? candidate : null;
 }
 
-/**
- * Validates that the configured Sales opening stage is actually parented by
- * the configured Sales pipeline. No browser pipeline/stage fallback is allowed.
- */
-async function configuredPipelineStageId(pipelineId: string, configuredValue: unknown, apiKey: string, locationId: string): Promise<string | null> {
-  const configured = id(configuredValue);
-  if (!configured) return null;
+/** Resolves the configured Sales pipeline's first ordered stage server-side. */
+async function configuredPipelineFirstStageId(pipelineId: string, apiKey: string, locationId: string): Promise<string | null> {
   try {
     const response = await fetch(`${BASE}/opportunities/pipelines?locationId=${encodeURIComponent(locationId)}`, { headers: { Authorization: `Bearer ${apiKey}`, Version: '2021-07-28' } });
     if (!response.ok) return null;
     const payload = await response.json() as { pipelines?: Array<{ id?: string; stages?: Array<{ id?: string }> }> };
     const pipeline = payload.pipelines?.find((candidate) => candidate.id === pipelineId);
-    return pipeline?.stages?.some((stage) => stage.id === configured) ? configured : null;
+    return id(pipeline?.stages?.[0]?.id);
   } catch { return null; }
 }
 
@@ -61,10 +56,10 @@ export default async function handler(req: Request) {
       const monetaryValue = body.monetaryValue;
       if (!contactId || !pipelineId || !name || name.length > 200) break;
       if (monetaryValue !== undefined && (typeof monetaryValue !== 'number' || !Number.isFinite(monetaryValue) || monetaryValue < 0)) break;
-      const stageId = await configuredPipelineStageId(pipelineId, process.env.GHL_SALES_PIPELINE_STAGE_ID, apiKey, locationId);
+      const stageId = await configuredPipelineFirstStageId(pipelineId, apiKey, locationId);
       if (!stageId) break;
       path = '/opportunities/'; method = 'POST';
-      payload = { pipelineId, locationId, contactId, name, status: 'open', ...(stageId ? { pipelineStageId: stageId } : {}), ...(monetaryValue === undefined ? {} : { monetaryValue }) };
+      payload = { pipelineId, locationId, contactId, name, status: 'open', pipelineStageId: stageId, ...(monetaryValue === undefined ? {} : { monetaryValue }) };
       break;
     }
     case 'updateOpportunityValue': { const value = Number(body.monetaryValue); if (!opportunityId || !Number.isFinite(value) || value < 0 || value > 10_000_000) break; path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { monetaryValue: value }; break; }
@@ -72,13 +67,6 @@ export default async function handler(req: Request) {
     case 'updateOpportunityStatus':
       if (!opportunityId || typeof body.status !== 'string') break;
       path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: body.status }; break;
-    case 'moveSalesOpportunityToStage': {
-      const pipelineId = id(process.env.GHL_SALES_PIPELINE_ID);
-      if (!opportunityId || body.stage !== 'proposal_sent' || !pipelineId) break;
-      const pipelineStageId = await configuredPipelineStageId(pipelineId, process.env.GHL_SALES_STAGE_PROPOSAL_SENT, apiKey, locationId);
-      if (!pipelineStageId) break;
-      path = `/opportunities/${opportunityId}`; method = 'PUT'; payload = { status: 'open', pipelineStageId }; break;
-    }
     case 'moveOpportunityToStage': {
       const stage = typeof body.stage === 'string' && ['job_created','scheduled','in_install','job_complete'].includes(body.stage)
         ? body.stage as ProductionStage : null;

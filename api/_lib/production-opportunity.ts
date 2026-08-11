@@ -17,7 +17,6 @@ interface ProductionConfig {
   apiKey: string;
   locationId: string;
   salesPipelineId: string;
-  salesStageId: string;
   productionPipelineId: string;
   productionStageId: string;
   productionStages: Record<ProductionStage, string>;
@@ -52,7 +51,6 @@ function readConfig(): ProductionConfig {
     apiKey: process.env.GHL_API_KEY?.trim() ?? '',
     locationId: requiredId('GHL_LOCATION_ID'),
     salesPipelineId: requiredId('GHL_SALES_PIPELINE_ID'),
-    salesStageId: requiredId('GHL_SALES_PIPELINE_STAGE_ID'),
     productionPipelineId: requiredId('GHL_PRODUCTION_PIPELINE_ID'),
     productionStageId: productionStages.job_created,
     productionStages,
@@ -91,9 +89,7 @@ async function validatePipelineParentage(config: ProductionConfig): Promise<void
   const payload = await response.json().catch(() => null) as { pipelines?: Pipeline[] } | null;
   const sales = payload?.pipelines?.find((pipeline) => pipeline.id === config.salesPipelineId);
   const production = payload?.pipelines?.find((pipeline) => pipeline.id === config.productionPipelineId);
-  if (!sales?.stages?.some((stage) => stage.id === config.salesStageId)) {
-    throw new ProductionOpportunityError('configured Sales stage is not in the Sales pipeline', 500);
-  }
+  if (!sales) throw new ProductionOpportunityError('configured Sales pipeline does not exist', 500);
   const productionStageIds = new Set(production?.stages?.map((stage) => stage.id).filter(Boolean));
   if (!production || Object.values(config.productionStages).some((stageId) => !productionStageIds.has(stageId))) {
     throw new ProductionOpportunityError('a configured Production stage is not in the Production pipeline', 500);

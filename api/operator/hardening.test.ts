@@ -20,6 +20,7 @@ beforeEach(() => {
   process.env.SUPABASE_URL = 'https://test.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'service';
   process.env.OPERATOR_SESSION_VERSION = '1';
+  delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
   delete process.env.GHL_SALES_STAGE_PROPOSAL_SENT;
   vi.restoreAllMocks();
 });
@@ -45,29 +46,33 @@ describe('operator data allowlists', () => {
 });
 
 describe('new consult opportunities', () => {
-  it('opens in an explicit stage of the server-configured pipeline', async () => {
+  it('uses only the first ordered stage of the server-configured pipeline and ignores the browser pipeline', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     process.env.GHL_SALES_PIPELINE_ID = 'server-pipeline';
-    process.env.GHL_SALES_PIPELINE_STAGE_ID = 'stage-consult';
-    const created: Array<Record<string, unknown>> = [];
+    const calls: Array<{ url: string; method: string; body?: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input).includes('/pipelines')) {
+      const url = String(input);
+      calls.push({ url, method: init?.method ?? 'GET', ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+      if (url.includes('/pipelines')) {
         return new Response(JSON.stringify({ pipelines: [{ id: 'server-pipeline', stages: [{ id: 'stage-consult' }, { id: 'stage-later' }] }] }), { status: 200 });
       }
-      created.push(JSON.parse(String(init?.body)));
       return new Response('{}', { status: 200 });
     }));
 
     const response = await post(ghlHandler, '/api/operator/ghl', token, { action: 'createOpportunity', contactId: 'c1', pipelineId: 'stale-client-pipeline', name: 'Customer — P-1' });
 
     expect(response.status).toBe(200);
-    expect(created[0]).toMatchObject({ pipelineId: 'server-pipeline', pipelineStageId: 'stage-consult', status: 'open' });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toMatchObject({
+      url: 'https://services.leadconnectorhq.com/opportunities/', method: 'POST',
+      body: { pipelineId: 'server-pipeline', pipelineStageId: 'stage-consult', status: 'open' },
+    });
+    expect(calls[1].body?.pipelineId).toBe('server-pipeline');
   });
 
   it('fails closed rather than falling back to a browser-supplied pipeline', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     delete process.env.GHL_SALES_PIPELINE_ID;
-    delete process.env.GHL_SALES_PIPELINE_STAGE_ID;
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -75,6 +80,43 @@ describe('new consult opportunities', () => {
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing exact pipeline', { pipelines: [{ id: 'other-pipeline', stages: [{ id: 'other-stage' }] }] }, 200],
+    ['malformed pipeline payload', { pipelines: {} }, 200],
+    ['empty stages', { pipelines: [{ id: 'server-pipeline', stages: [] }] }, 200],
+    ['invalid first stage', { pipelines: [{ id: 'server-pipeline', stages: [{ id: 'not valid' }, { id: 'later-valid' }] }] }, 200],
+    ['non-OK pipeline response', {}, 503],
+  ])('fails closed before opportunity creation for %s', async (_label, payload, status) => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    process.env.GHL_SALES_PIPELINE_ID = 'server-pipeline';
+    const calls: Array<{ url: string; method: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), method: init?.method ?? 'GET' });
+      return new Response(JSON.stringify(payload), { status });
+    }));
+
+    const response = await post(ghlHandler, '/api/operator/ghl', token, {
+      action: 'createOpportunity', contactId: 'c1', pipelineId: 'client-pipeline', name: 'Customer — P-1',
+    });
+
+    expect(response.status).toBe(400);
+    expect(calls).toEqual([{ url: expect.stringContaining('/opportunities/pipelines?'), method: 'GET' }]);
+  });
+
+  it('fails closed before opportunity creation when the pipeline fetch throws', async () => {
+    const { token } = await issueOperatorToken('todd', 'pin');
+    process.env.GHL_SALES_PIPELINE_ID = 'server-pipeline';
+    const fetchMock = vi.fn(async () => { throw new TypeError('network down'); });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post(ghlHandler, '/api/operator/ghl', token, {
+      action: 'createOpportunity', contactId: 'c1', name: 'Customer — P-1',
+    });
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a raw browser pipelineStageId before any upstream request', async () => {
@@ -105,49 +147,10 @@ describe('new consult opportunities', () => {
     expect(calls).toEqual([{ url: 'https://services.leadconnectorhq.com/opportunities/sales-opp', body: { status: 'Invoice Requested' } }]);
   });
 
-  it('maps Proposal Sent to the server-owned Sales stage after validating parentage', async () => {
-    const { token } = await issueOperatorToken('todd', 'pin');
-    process.env.GHL_SALES_PIPELINE_ID = 'sales-pipeline';
-    process.env.GHL_SALES_STAGE_PROPOSAL_SENT = 'proposal-sent-stage';
-    const calls: Array<{ url: string; method: string; body?: unknown }> = [];
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = String(input); calls.push({ url, method: init?.method ?? 'GET', ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
-      if (url.includes('/pipelines')) return new Response(JSON.stringify({ pipelines: [{ id: 'sales-pipeline', stages: [{ id: 'proposal-sent-stage' }] }] }), { status: 200 });
-      return new Response('{}', { status: 200 });
-    }));
-
-    const response = await post(ghlHandler, '/api/operator/ghl', token, {
-      action: 'moveSalesOpportunityToStage', opportunityId: 'sales-opp', stage: 'proposal_sent',
-    });
-
-    expect(response.status).toBe(200);
-    expect(calls).toHaveLength(2);
-    expect(calls[1]).toEqual({
-      url: 'https://services.leadconnectorhq.com/opportunities/sales-opp', method: 'PUT',
-      body: { status: 'open', pipelineStageId: 'proposal-sent-stage' },
-    });
-  });
-
-  it('fails closed when Proposal Sent config is missing or parented by another pipeline', async () => {
-    const { token } = await issueOperatorToken('todd', 'pin');
-    process.env.GHL_SALES_PIPELINE_ID = 'sales-pipeline';
-    const fetchMock = vi.fn(); vi.stubGlobal('fetch', fetchMock);
-    const request = { action: 'moveSalesOpportunityToStage', opportunityId: 'sales-opp', stage: 'proposal_sent' };
-
-    expect((await post(ghlHandler, '/api/operator/ghl', token, request)).status).toBe(400);
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    process.env.GHL_SALES_STAGE_PROPOSAL_SENT = 'wrong-parent-stage';
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ pipelines: [{ id: 'sales-pipeline', stages: [{ id: 'other-stage' }] }] }), { status: 200 }));
-    expect((await post(ghlHandler, '/api/operator/ghl', token, request)).status).toBe(400);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined();
-  });
-
   it('keeps Production stage routing semantic and server-owned', async () => {
     const { token } = await issueOperatorToken('todd', 'pin');
     Object.assign(process.env, {
-      GHL_SALES_PIPELINE_ID: 'sales-pipeline', GHL_SALES_PIPELINE_STAGE_ID: 'sales-opening',
+      GHL_SALES_PIPELINE_ID: 'sales-pipeline',
       GHL_PRODUCTION_PIPELINE_ID: 'production-pipeline', GHL_STAGE_JOB_CREATED: 'job-created',
       GHL_STAGE_SCHEDULED: 'scheduled-stage', GHL_STAGE_IN_INSTALL: 'install-stage', GHL_STAGE_JOB_COMPLETE: 'complete-stage',
       VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID: 'production-pipeline', VITE_GHL_STAGE_JOB_CREATED: 'job-created',

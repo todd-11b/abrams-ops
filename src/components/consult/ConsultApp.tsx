@@ -22,7 +22,6 @@ import {
 
 type AppStep = "consult" | "proposal" | "signpay";
 
-const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
 const currentTimestamp = () => Date.now();
 
 interface LocalDraft {
@@ -430,7 +429,6 @@ export const ConsultApp = () => {
       if (realContactId && !opportunityId) {
         const created: unknown = await crmApi.createOpportunity({
           contactId: realContactId,
-          pipelineId: SALES_PIPELINE_ID,
           name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
           monetaryValue: totals.grandTotal,
         });
@@ -729,13 +727,6 @@ export const ConsultApp = () => {
           { key: "contact.proposal_link", value: proposalLink }
         ]
       });
-
-      if (form.opportunityId) {
-        // The browser names only the business transition. The server owns the
-        // Sales pipeline/stage ID and validates parentage before forwarding it.
-        crmApi.moveSalesOpportunityToStage(form.opportunityId, "proposal_sent")
-          .catch(err => console.error("Failed to move proposal to Proposal Sent", err));
-      }
 
       setForm((prev) => ({
         ...prev,

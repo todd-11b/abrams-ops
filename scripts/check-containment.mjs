@@ -9,8 +9,6 @@ const requiredServer = [
   'GHL_WEBHOOK_SECRET',
   'GHL_TODD_CONTACT_ID',
   'GHL_SALES_PIPELINE_ID',
-  'GHL_SALES_PIPELINE_STAGE_ID',
-  'GHL_SALES_STAGE_PROPOSAL_SENT',
   'GHL_PRODUCTION_PIPELINE_ID',
   'GHL_STAGE_JOB_CREATED',
   'GHL_STAGE_SCHEDULED',
@@ -44,6 +42,10 @@ const obsoleteBrowser = [
   'VITE_GHL_LOCATION_ID',
   'VITE_STRIPE_PUBLISHABLE_KEY',
 ];
+const removedServer = [
+  'GHL_SALES_PIPELINE_STAGE_ID',
+  'GHL_SALES_STAGE_PROPOSAL_SENT',
+];
 
 const envExample = fs.readFileSync('.env.example', 'utf8');
 const assignments = [...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
@@ -55,6 +57,7 @@ if (actualNames.length !== expectedNames.length || expectedNames.some((name) => 
 }
 if (assignments.some((match) => match[2] !== '')) throw new Error('.env.example must not contain example values');
 if (obsoleteBrowser.some((name) => envExample.includes(name))) throw new Error('.env.example contains obsolete browser variables');
+if (removedServer.some((name) => envExample.includes(name))) throw new Error('.env.example contains removed Sales-stage variables');
 if (!envExample.includes('must be distinct') || !envExample.includes('exactly four ASCII digits')) throw new Error('.env.example PIN contract is missing');
 if (!envExample.includes('Client-public routing (browser-exposed, required)') ||
     !envExample.includes('Server-only secrets (required; never browser-exposed)') ||
@@ -93,6 +96,11 @@ if (/VITE_GHL_API_KEY/.test(client)) throw new Error('browser GHL secret referen
 if (/createClient\s*\(/.test(client)) throw new Error('browser Supabase client remains');
 if (/\bsendSms\b|conversations\/messages/.test(client)) throw new Error('browser SMS action remains');
 if (/updateOpportunityStatus\([^)]*,[^)]*,/.test(client) || /pipelineStageId/.test(client)) throw new Error('browser-supplied raw stage routing remains');
+if (/moveSalesOpportunityToStage|getPipelines\s*:\s*\(\)/.test(client)) throw new Error('removed client Sales-stage routing remains');
+const serverSource = fs.readdirSync('api', { recursive: true })
+  .filter((file) => typeof file === 'string' && /\.(ts|tsx)$/.test(file) && !/\.test\./.test(file))
+  .map((file) => fs.readFileSync(`api/${file}`, 'utf8')).join('\n');
+if (removedServer.some((name) => serverSource.includes(name))) throw new Error('removed Sales-stage configuration remains in server source');
 const additive = fs.readFileSync('supabase/migrations/20260801000000_operator_containment.sql', 'utf8');
 if (!additive.includes('consume_operator_login_attempt') || !additive.includes("interval '15 minutes'") || !additive.includes("interval '24 hours'") || !additive.includes('failed_attempts + 1 >= 5')) throw new Error('durable login throttling is missing');
 for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create_job_from_proposal_token(text,jsonb)']) {
