@@ -15,6 +15,8 @@
 // Auth: required X-Abrams-Webhook-Secret header, constant-time compared
 // against GHL_WEBHOOK_SECRET. Mismatch -> 401 + SMS to Todd, no DB writes.
 
+import { ensureProductionOpportunity, productionStageRouting, ProductionOpportunityError } from '../_lib/production-opportunity';
+
 export const config = { runtime: 'edge' };
 
 const GHL_BASE = 'https://services.leadconnectorhq.com';
@@ -97,6 +99,10 @@ interface InvoicePaidPayload {
 interface JobRow {
   job_id: string;
   job_number: string;
+  proposal_id: string | null;
+  sales_opportunity_id: string | null;
+  production_opportunity_id: string | null;
+  opportunity_contract: 'legacy_single_v1' | 'separate_v1';
   deposit_status: string;
   final_payment_status: string;
 }
@@ -107,6 +113,38 @@ interface JobRow {
  * alert to fire rather than inventing a job with no priced snapshot.
  */
 async function createJobFromDepositDraft(ctx: SbCtx, opportunityId: string): Promise<JobRow | null> {
+  const lookup = await sb(ctx,
+    `deposit_invoice_drafts?sales_opportunity_id=eq.${encodeURIComponent(opportunityId)}&superseded_at=is.null&select=draft_id,contact_id,proposal_id,sales_opportunity_id,production_opportunity_id,opportunity_contract,fence_spec`,
+    { method: 'GET' });
+  if (!lookup.ok) return null;
+  const draftPayload = await lookup.json().catch(() => []) as unknown;
+  const [draft] = (Array.isArray(draftPayload) ? draftPayload : []) as Array<{
+    draft_id: string;
+    contact_id: string;
+    proposal_id: string;
+    sales_opportunity_id: string;
+    production_opportunity_id: string | null;
+    opportunity_contract: 'legacy_single_v1' | 'separate_pending_v1' | 'separate_v1';
+    fence_spec: { proposal_total?: number } | null;
+  }>;
+  if (!draft || draft.opportunity_contract === 'legacy_single_v1') return null;
+  let productionOpportunityId: string;
+  try {
+    productionOpportunityId = draft.production_opportunity_id ?? await ensureProductionOpportunity({
+      contactId: draft.contact_id,
+      salesOpportunityId: draft.sales_opportunity_id,
+      monetaryValue: draft.fence_spec?.proposal_total,
+    });
+  } catch (error) {
+    const reason = error instanceof ProductionOpportunityError ? error.message : 'unknown error';
+    console.error('[ghl-invoice-paid] Production opportunity boundary failed', reason);
+    return null;
+  }
+  const bound = await sb(ctx, `deposit_invoice_drafts?draft_id=eq.${encodeURIComponent(draft.draft_id)}&opportunity_contract=in.(separate_pending_v1,separate_v1)`, {
+    method: 'PATCH',
+    body: JSON.stringify({ production_opportunity_id: productionOpportunityId, opportunity_contract: 'separate_v1' }),
+  });
+  if (!bound.ok) return null;
   let response: Response;
   try {
     response = await sb(ctx, 'rpc/create_job_from_deposit_draft', {
@@ -125,7 +163,22 @@ async function createJobFromDepositDraft(ctx: SbCtx, opportunityId: string): Pro
   const payload = await response.json().catch(() => null) as Array<{ job_id?: string; job_number?: string }> | null;
   const created = Array.isArray(payload) ? payload[0] : null;
   if (!created?.job_id || !created.job_number) return null;
-  return { job_id: created.job_id, job_number: created.job_number, deposit_status: 'pending_invoice', final_payment_status: 'unpaid' };
+  return {
+    job_id: created.job_id,
+    job_number: created.job_number,
+    proposal_id: draft.proposal_id,
+    sales_opportunity_id: draft.sales_opportunity_id,
+    production_opportunity_id: productionOpportunityId,
+    opportunity_contract: 'separate_v1',
+    deposit_status: 'pending_invoice',
+    final_payment_status: 'unpaid',
+  };
+}
+
+function stageOpportunityId(job: JobRow): string | null {
+  if (job.opportunity_contract === 'separate_v1') return job.production_opportunity_id;
+  if (job.opportunity_contract === 'legacy_single_v1') return job.proposal_id;
+  return null;
 }
 
 export default async function handler(req: Request) {
@@ -134,8 +187,6 @@ export default async function handler(req: Request) {
   const SUPABASE_URL = process.env.SUPABASE_URL ?? '';
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? '';
   const GHL_API_KEY = process.env.GHL_API_KEY ?? '';
-  const GHL_STAGE_JOB_CREATED = process.env.GHL_STAGE_JOB_CREATED ?? '';
-  const GHL_STAGE_JOB_COMPLETE = process.env.GHL_STAGE_JOB_COMPLETE ?? '';
   const GHL_WEBHOOK_SECRET = process.env.GHL_WEBHOOK_SECRET ?? '';
   const GHL_TODD_CONTACT_ID = process.env.GHL_TODD_CONTACT_ID ?? '';
   const GHL_OUTBOUND_IP_PREFIXES = (process.env.GHL_OUTBOUND_IP_PREFIXES ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -178,11 +229,22 @@ export default async function handler(req: Request) {
     return json({ error: `unknown paymentType: ${rawType}` }, { status: 400 });
   }
   const paymentType = rawType as PaymentType;
+  let GHL_STAGE_JOB_CREATED: string;
+  let GHL_STAGE_JOB_COMPLETE: string;
+  try {
+    GHL_STAGE_JOB_CREATED = productionStageRouting('job_created');
+    GHL_STAGE_JOB_COMPLETE = productionStageRouting('job_complete');
+  } catch {
+    return json({ error: 'Production routing is not safely configured' }, { status: 500 });
+  }
 
-  // --- Lookup job by proposal_id (both paths need both *_status fields) ---
+  // New jobs match either inbound Sales provenance or their Production ID, but
+  // every stage mutation below targets only the persisted Production ID.
+  // Explicit legacy rows retain their historical one-ID behavior.
+  const encodedOpportunityId = encodeURIComponent(opportunityId);
   const lookupRes = await sb(
     sbCtx,
-    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&select=job_id,job_number,deposit_status,final_payment_status`,
+    `jobs?or=(production_opportunity_id.eq.${encodedOpportunityId},sales_opportunity_id.eq.${encodedOpportunityId},and(opportunity_contract.eq.legacy_single_v1,proposal_id.eq.${encodedOpportunityId}))&select=job_id,job_number,proposal_id,sales_opportunity_id,production_opportunity_id,opportunity_contract,deposit_status,final_payment_status`,
     { method: 'GET' }
   );
   if (!lookupRes.ok) {
@@ -216,13 +278,15 @@ export default async function handler(req: Request) {
   }
 
   const job = rows[0];
+  const stageOpportunity = stageOpportunityId(job);
+  if (!stageOpportunity) return json({ error: 'job has no valid Production opportunity boundary' }, { status: 409 });
   const nowIso = new Date().toISOString();
 
   if (paymentType === 'deposit') {
-    return handleDeposit(req, sbCtx, job, body, nowIso, opportunityId, contactId,
+    return handleDeposit(req, sbCtx, job, body, nowIso, stageOpportunity, contactId,
       { GHL_API_KEY, GHL_STAGE_JOB_CREATED });
   }
-  return handleFinalBalance(req, sbCtx, job, body, nowIso, opportunityId, contactId,
+  return handleFinalBalance(req, sbCtx, job, body, nowIso, stageOpportunity, contactId,
     { GHL_API_KEY, GHL_STAGE_JOB_COMPLETE });
 }
 
@@ -232,7 +296,7 @@ async function handleDeposit(
   job: JobRow,
   body: InvoicePaidPayload,
   nowIso: string,
-  opportunityId: string,
+  productionOpportunityId: string,
   contactId: string | undefined,
   env: { GHL_API_KEY: string; GHL_STAGE_JOB_CREATED: string },
 ): Promise<Response> {
@@ -244,7 +308,7 @@ async function handleDeposit(
   // UPDATE
   const updateRes = await sb(
     sbCtx,
-    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&deposit_status=eq.pending_invoice`,
+    `jobs?job_id=eq.${encodeURIComponent(job.job_id)}&deposit_status=eq.pending_invoice`,
     {
       method: 'PATCH',
       body: JSON.stringify({
@@ -272,7 +336,7 @@ async function handleDeposit(
       type: 'deposit_paid_via_invoice',
       actor: 'system',
       source: 'workflow',
-      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, opportunity_id: opportunityId },
+      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, production_opportunity_id: productionOpportunityId },
     }),
   });
   if (!activityRes.ok) {
@@ -283,7 +347,7 @@ async function handleDeposit(
   // GHL stage move (fail-soft)
   if (env.GHL_API_KEY && env.GHL_STAGE_JOB_CREATED) {
     try {
-      const response = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+      const response = await fetch(`${GHL_BASE}/opportunities/${productionOpportunityId}`, {
         method: 'PUT',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_CREATED }),
@@ -318,7 +382,7 @@ async function handleFinalBalance(
   job: JobRow,
   body: InvoicePaidPayload,
   nowIso: string,
-  opportunityId: string,
+  productionOpportunityId: string,
   contactId: string | undefined,
   env: { GHL_API_KEY: string; GHL_STAGE_JOB_COMPLETE: string },
 ): Promise<Response> {
@@ -331,7 +395,7 @@ async function handleFinalBalance(
   // concurrent deliveries race safely without overwriting a paid timestamp.
   const updateRes = await sb(
     sbCtx,
-    `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&final_payment_status=in.(unpaid,pending_invoice)`,
+    `jobs?job_id=eq.${encodeURIComponent(job.job_id)}&final_payment_status=in.(unpaid,pending_invoice)`,
     {
       method: 'PATCH',
       body: JSON.stringify({
@@ -351,7 +415,7 @@ async function handleFinalBalance(
     // actually moved the row to paid. Re-read before making that claim.
     const raceLookup = await sb(
       sbCtx,
-      `jobs?proposal_id=eq.${encodeURIComponent(opportunityId)}&select=job_id,job_number,deposit_status,final_payment_status`,
+      `jobs?job_id=eq.${encodeURIComponent(job.job_id)}&select=job_id,job_number,proposal_id,sales_opportunity_id,production_opportunity_id,opportunity_contract,deposit_status,final_payment_status`,
       { method: 'GET' },
     );
     if (!raceLookup.ok) {
@@ -364,7 +428,7 @@ async function handleFinalBalance(
       return json({ already_processed: true, job_id: current.job_id, job_number: current.job_number }, { status: 200 });
     }
     console.error('[ghl-invoice-paid] final UPDATE changed no rows and payment is not paid', {
-      opportunityId,
+      productionOpportunityId,
       finalPaymentStatus: current?.final_payment_status ?? 'missing',
     });
     return json({ error: 'final payment state conflict' }, { status: 409 });
@@ -379,7 +443,7 @@ async function handleFinalBalance(
       type: 'final_payment_via_invoice',
       actor: 'system',
       source: 'workflow',
-      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, opportunity_id: opportunityId },
+      payload: { invoice_id: body.invoiceId ?? null, amount_paid: body.amountPaid ?? null, production_opportunity_id: productionOpportunityId },
     }),
   });
   if (!activityRes.ok) {
@@ -390,7 +454,7 @@ async function handleFinalBalance(
   // GHL stage move to Job Complete (fail-soft)
   if (env.GHL_API_KEY && env.GHL_STAGE_JOB_COMPLETE) {
     try {
-      const response = await fetch(`${GHL_BASE}/opportunities/${opportunityId}`, {
+      const response = await fetch(`${GHL_BASE}/opportunities/${productionOpportunityId}`, {
         method: 'PUT',
         headers: ghlHeaders(env.GHL_API_KEY),
         body: JSON.stringify({ pipelineStageId: env.GHL_STAGE_JOB_COMPLETE }),

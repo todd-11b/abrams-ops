@@ -95,6 +95,9 @@ export default async function handler(req: Request) {
     body: JSON.stringify({
       contact_id: body.contact_id,
       proposal_id: body.proposal_id,
+      sales_opportunity_id: body.proposal_id,
+      production_opportunity_id: null,
+      opportunity_contract: 'separate_pending_v1',
       deposit_amount: deposit,
       fence_spec: fenceSpec,
       created_by: operator.sub,

@@ -22,17 +22,11 @@ import {
 
 type AppStep = "consult" | "proposal" | "signpay";
 
-const SALES_PIPELINE_ID = "afca3dmAyyMoiEbF5Hvy";
 const currentTimestamp = () => Date.now();
 
 interface LocalDraft {
   timestamp: number;
   form: ConsultFormData;
-}
-
-interface PipelineRecord {
-  id?: string;
-  stages?: Array<{ id?: string; name?: string }>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -435,7 +429,6 @@ export const ConsultApp = () => {
       if (realContactId && !opportunityId) {
         const created: unknown = await crmApi.createOpportunity({
           contactId: realContactId,
-          pipelineId: SALES_PIPELINE_ID,
           name: `${form.contactName.trim() || "New customer"} — ${form.proposalId}`,
           monetaryValue: totals.grandTotal,
         });
@@ -734,19 +727,6 @@ export const ConsultApp = () => {
           { key: "contact.proposal_link", value: proposalLink }
         ]
       });
-
-      if (form.opportunityId) {
-        // Find the stage ID for "Proposal Sent" by calling getPipelines in the background
-        crmApi.getPipelines().then((response: unknown) => {
-          if (!isRecord(response) || !Array.isArray(response.pipelines)) return;
-          const pipelines = response.pipelines.filter((value: unknown): value is PipelineRecord => isRecord(value));
-          const pipeline = pipelines.find((value) => value.id === SALES_PIPELINE_ID);
-          const stage = pipeline?.stages?.find((value) => value.name === "Proposal Sent");
-          if (stage) {
-            crmApi.updateOpportunityStatus(form.opportunityId, "open", stage.id);
-          }
-        }).catch(err => console.error("Failed to fetch pipeline stages", err));
-      }
 
       setForm((prev) => ({
         ...prev,

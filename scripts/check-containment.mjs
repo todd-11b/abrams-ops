@@ -8,7 +8,11 @@ const requiredServer = [
   'GHL_LOCATION_ID',
   'GHL_WEBHOOK_SECRET',
   'GHL_TODD_CONTACT_ID',
+  'GHL_SALES_PIPELINE_ID',
+  'GHL_PRODUCTION_PIPELINE_ID',
   'GHL_STAGE_JOB_CREATED',
+  'GHL_STAGE_SCHEDULED',
+  'GHL_STAGE_IN_INSTALL',
   'GHL_STAGE_JOB_COMPLETE',
   'OPERATOR_SESSION_SECRET',
   'OPERATOR_TODD_PIN',
@@ -19,8 +23,6 @@ const requiredServer = [
 const optionalServer = [
   'OPERATOR_SESSION_VERSION',
   'GHL_OUTBOUND_IP_PREFIXES',
-  'GHL_SALES_PIPELINE_ID',
-  'GHL_SALES_PIPELINE_STAGE_ID',
   'GHL_BUSINESS_NAME',
 ];
 const requiredPublic = [
@@ -40,6 +42,10 @@ const obsoleteBrowser = [
   'VITE_GHL_LOCATION_ID',
   'VITE_STRIPE_PUBLISHABLE_KEY',
 ];
+const removedServer = [
+  'GHL_SALES_PIPELINE_STAGE_ID',
+  'GHL_SALES_STAGE_PROPOSAL_SENT',
+];
 
 const envExample = fs.readFileSync('.env.example', 'utf8');
 const assignments = [...envExample.matchAll(/^([A-Z][A-Z0-9_]*)=(.*)$/gm)];
@@ -51,6 +57,7 @@ if (actualNames.length !== expectedNames.length || expectedNames.some((name) => 
 }
 if (assignments.some((match) => match[2] !== '')) throw new Error('.env.example must not contain example values');
 if (obsoleteBrowser.some((name) => envExample.includes(name))) throw new Error('.env.example contains obsolete browser variables');
+if (removedServer.some((name) => envExample.includes(name))) throw new Error('.env.example contains removed Sales-stage variables');
 if (!envExample.includes('must be distinct') || !envExample.includes('exactly four ASCII digits')) throw new Error('.env.example PIN contract is missing');
 if (!envExample.includes('Client-public routing (browser-exposed, required)') ||
     !envExample.includes('Server-only secrets (required; never browser-exposed)') ||
@@ -88,6 +95,12 @@ const client = files.map((file) => fs.readFileSync(`src/${file}`, 'utf8')).join(
 if (/VITE_GHL_API_KEY/.test(client)) throw new Error('browser GHL secret reference remains');
 if (/createClient\s*\(/.test(client)) throw new Error('browser Supabase client remains');
 if (/\bsendSms\b|conversations\/messages/.test(client)) throw new Error('browser SMS action remains');
+if (/updateOpportunityStatus\([^)]*,[^)]*,/.test(client) || /pipelineStageId/.test(client)) throw new Error('browser-supplied raw stage routing remains');
+if (/moveSalesOpportunityToStage|getPipelines\s*:\s*\(\)/.test(client)) throw new Error('removed client Sales-stage routing remains');
+const serverSource = fs.readdirSync('api', { recursive: true })
+  .filter((file) => typeof file === 'string' && /\.(ts|tsx)$/.test(file) && !/\.test\./.test(file))
+  .map((file) => fs.readFileSync(`api/${file}`, 'utf8')).join('\n');
+if (removedServer.some((name) => serverSource.includes(name))) throw new Error('removed Sales-stage configuration remains in server source');
 const additive = fs.readFileSync('supabase/migrations/20260801000000_operator_containment.sql', 'utf8');
 if (!additive.includes('consume_operator_login_attempt') || !additive.includes("interval '15 minutes'") || !additive.includes("interval '24 hours'") || !additive.includes('failed_attempts + 1 >= 5')) throw new Error('durable login throttling is missing');
 for (const signature of ['consume_operator_login_attempt(text,boolean)', 'create_job_from_proposal_token(text,jsonb)']) {
@@ -102,6 +115,23 @@ if (!deposits.includes('REVOKE ALL ON FUNCTION create_job_from_deposit_draft(tex
   throw new Error('deposit draft RPC grants are not service-role only');
 }
 if (!deposits.includes('deposit_invoice_drafts_live_proposal')) throw new Error('deposit drafts allow more than one live price per opportunity');
+const opportunityBoundary = fs.readFileSync('supabase/migrations/20260811051345_separate_production_opportunity.sql', 'utf8');
+for (const signature of [
+  'claim_production_opportunity(text,text,text,text,text,text)',
+  'mark_production_opportunity_attempted(text,text)',
+  'finalize_production_opportunity(text,text,text)',
+  'release_unattempted_production_claim(text,text)',
+]) {
+  if (!opportunityBoundary.includes(`REVOKE ALL ON FUNCTION ${signature} FROM PUBLIC, anon, authenticated;`)) throw new Error(`public Production RPC revoke missing: ${signature}`);
+  if (!opportunityBoundary.includes(`GRANT EXECUTE ON FUNCTION ${signature} TO service_role;`)) throw new Error(`service-role Production RPC grant missing: ${signature}`);
+}
+if (!opportunityBoundary.includes("opportunity_contract = 'legacy_single_v1'") ||
+    !opportunityBoundary.includes("opportunity_contract = 'separate_v1'")) {
+  throw new Error('legacy/new opportunity compatibility contract is missing');
+}
+if (!opportunityBoundary.includes('create_attempted_at') || !opportunityBoundary.includes("'reconcile'")) {
+  throw new Error('ambiguous Production creation is not reconciliation-only');
+}
 const invoiceRoute = fs.readFileSync('api/operator/invoice.ts', 'utf8');
 if (/invoices\/[^`'"]*\/send/.test(invoiceRoute)) throw new Error('the invoice route sends rather than drafts');
 if (!invoiceRoute.includes("canOperator(operator, 'operator:invoices')")) throw new Error('the invoice route is not owner-gated');

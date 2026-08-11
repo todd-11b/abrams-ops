@@ -3,17 +3,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Changelog: cover pending final invoices, guarded-update races, duplicates, and GHL HTTP failures.
 import handler from './ghl-invoice-paid';
 
+const ensureProductionOpportunityMock = vi.hoisted(() => vi.fn());
+vi.mock('../_lib/production-opportunity', () => ({
+  ensureProductionOpportunity: ensureProductionOpportunityMock,
+  productionStageRouting: (stage: string) => ({ job_created: 'stage-jc', scheduled: 'stage-scheduled', in_install: 'stage-install', job_complete: 'stage-jc-complete' })[stage],
+  ProductionOpportunityError: class ProductionOpportunityError extends Error { constructor(message: string, readonly status = 502) { super(message); } },
+}));
+
 beforeEach(() => {
   process.env.SUPABASE_URL = 'https://test.supabase.co';
   process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-key';
   process.env.GHL_API_KEY = 'test-ghl-key';
   process.env.GHL_LOCATION_ID = 'test-loc';
+  process.env.GHL_SALES_PIPELINE_ID = 'sales-pipeline';
+  process.env.GHL_PRODUCTION_PIPELINE_ID = 'production-pipeline';
   process.env.GHL_STAGE_JOB_CREATED = 'stage-jc';
+  process.env.GHL_STAGE_SCHEDULED = 'stage-scheduled';
+  process.env.GHL_STAGE_IN_INSTALL = 'stage-install';
   process.env.GHL_STAGE_JOB_COMPLETE = 'stage-jc-complete';
+  process.env.VITE_GHL_FENCE_PRODUCTION_PIPELINE_ID = 'production-pipeline';
+  process.env.VITE_GHL_STAGE_JOB_CREATED = 'stage-jc';
+  process.env.VITE_GHL_STAGE_SCHEDULED = 'stage-scheduled';
+  process.env.VITE_GHL_STAGE_IN_INSTALL = 'stage-install';
+  process.env.VITE_GHL_STAGE_JOB_COMPLETE = 'stage-jc-complete';
   process.env.GHL_WEBHOOK_SECRET = 'top-secret-32-char-string-AAAAAAA';
   process.env.GHL_TODD_CONTACT_ID = 'TestContactId12345678';
   process.env.GHL_OUTBOUND_IP_PREFIXES = '';
   vi.restoreAllMocks();
+  ensureProductionOpportunityMock.mockReset();
+  ensureProductionOpportunityMock.mockResolvedValue('production-unsigned');
 });
 
 function makeReq(opts: { body: unknown; secret?: string; ip?: string }): Request {
@@ -44,7 +62,12 @@ function mockSupabaseAndGhl(opts: {
     const method = init?.method || 'GET';
     if (url.includes('/rest/v1/jobs') && method === 'GET') {
       const rows = jobLookupCount++ === 0 ? opts.jobLookupRows : (opts.raceLookupRows ?? opts.jobLookupRows);
-      return new Response(JSON.stringify(rows), { status: 200 });
+      return new Response(JSON.stringify(rows.map((row) => ({
+        sales_opportunity_id: (row as { proposal_id?: string }).proposal_id ?? null,
+        production_opportunity_id: null,
+        opportunity_contract: 'legacy_single_v1',
+        ...row as object,
+      }))), { status: 200 });
     }
     if (url.includes('/rest/v1/jobs') && method === 'PATCH') {
       const updated = opts.patchUpdated ?? [{ job_id: 'job-1', job_number: 'AF-2026-0010', deposit_status: 'paid', final_payment_status: 'paid' }];
@@ -78,7 +101,7 @@ describe('ghl-invoice-paid webhook', () => {
 
     const update = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
     expect(update).toBeDefined();
-    expect(update!.url).toContain('proposal_id=eq.opp-1');
+    expect(update!.url).toContain('job_id=eq.job-1');
     expect(update!.url).toContain('deposit_status=eq.pending_invoice');
     const updateBody = JSON.parse(update!.init.body as string);
     expect(updateBody.deposit_status).toBe('paid');
@@ -103,6 +126,25 @@ describe('ghl-invoice-paid webhook', () => {
     const noteBody = JSON.parse(note!.init.body as string);
     expect(noteBody.body).toContain('Deposit received');
     expect(noteBody.body).toContain('AF-2026-0010');
+  });
+
+  it('accepts a Sales-keyed deposit event but stages only the distinct Production opportunity', async () => {
+    const { calls } = mockSupabaseAndGhl({ jobLookupRows: [{
+      job_id: 'job-1', job_number: 'AF-2026-0010', proposal_id: 'sales-opp',
+      sales_opportunity_id: 'sales-opp', production_opportunity_id: 'production-opp',
+      opportunity_contract: 'separate_v1', deposit_status: 'pending_invoice', final_payment_status: 'unpaid',
+    }] });
+
+    const response = await handler(makeReq({
+      secret: VALID_SECRET,
+      body: { contactId: 'c1', opportunityId: 'sales-opp', invoiceId: 'inv-1', amountPaid: 5000 },
+    }));
+
+    expect(response.status).toBe(201);
+    expect(calls.some((call) => call.url.includes('/opportunities/production-opp') && call.init.method === 'PUT')).toBe(true);
+    expect(calls.some((call) => call.url.includes('/opportunities/sales-opp') && call.init.method === 'PUT')).toBe(false);
+    const activity = calls.find((call) => call.url.includes('/rest/v1/job_activity_log'));
+    expect(JSON.parse(String(activity?.init.body)).payload).toMatchObject({ production_opportunity_id: 'production-opp' });
   });
 
   it('returns 401 + sends SMS on bad secret', async () => {
@@ -228,7 +270,7 @@ describe('ghl-invoice-paid webhook', () => {
 
     const update = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
     expect(update).toBeDefined();
-    expect(update!.url).toContain('proposal_id=eq.opp-1');
+    expect(update!.url).toContain('job_id=eq.job-1');
     expect(update!.url).toContain('final_payment_status=in.(unpaid,pending_invoice)');
     const updateBody = JSON.parse(update!.init.body as string);
     expect(updateBody.final_payment_status).toBe('paid');
@@ -426,6 +468,14 @@ describe('ghl-invoice-paid webhook', () => {
       if (url.includes('/rest/v1/rpc/create_job_from_deposit_draft')) {
         return new Response(JSON.stringify([{ job_id: 'job-9', job_number: 'AF-2026-0099', created: true }]), { status: 200 });
       }
+      if (url.includes('/rest/v1/deposit_invoice_drafts') && method === 'GET') {
+        return new Response(JSON.stringify([{
+          draft_id: 'draft-1', contact_id: 'c1', proposal_id: 'opp-unsigned',
+          sales_opportunity_id: 'opp-unsigned', production_opportunity_id: null,
+          opportunity_contract: 'separate_pending_v1', fence_spec: { proposal_total: 3900 },
+        }]), { status: 200 });
+      }
+      if (url.includes('/rest/v1/deposit_invoice_drafts') && method === 'PATCH') return new Response('[{}]', { status: 200 });
       if (url.includes('/rest/v1/jobs') && method === 'GET') {
         jobLookups++;
         return new Response('[]', { status: 200 });
@@ -448,6 +498,7 @@ describe('ghl-invoice-paid webhook', () => {
     expect(JSON.parse(rpc!.init.body as string)).toEqual({ p_proposal_id: 'opp-unsigned' });
     const patch = calls.find(c => c.url.includes('/rest/v1/jobs') && c.init.method === 'PATCH');
     expect(patch?.url).toContain('deposit_status=eq.pending_invoice');
+    expect(calls.some(c => c.url.includes('/opportunities/production-unsigned') && c.init.method === 'PUT')).toBe(true);
   });
 
   it('still alerts when a payment arrives for an opportunity with no live draft', async () => {

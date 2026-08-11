@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import handler from './create-job';
 
+const ensureProductionOpportunityMock = vi.hoisted(() => vi.fn());
+vi.mock('../_lib/production-opportunity', () => ({
+  ensureProductionOpportunity: ensureProductionOpportunityMock,
+  ProductionOpportunityError: class ProductionOpportunityError extends Error { constructor(message: string, readonly status = 502) { super(message); } },
+}));
+
 const token = 'a'.repeat(64);
 function request(body: unknown) { return new Request('http://test/api/proposal/create-job', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
 
 beforeEach(() => {
   process.env.SUPABASE_URL = 'https://test.supabase.co'; process.env.SUPABASE_SERVICE_ROLE_KEY = 'service'; process.env.GHL_API_KEY = 'ghl';
   vi.restoreAllMocks();
+  ensureProductionOpportunityMock.mockReset();
+  ensureProductionOpportunityMock.mockResolvedValue('production-o1');
 });
 
 describe('atomic proposal signing', () => {
@@ -33,10 +41,35 @@ describe('atomic proposal signing', () => {
     const res = await handler(request({ token, proposal_display_id: 'P-1' }));
     expect(res.status).toBe(201);
     expect(await res.json()).toMatchObject({ job_id: 'j1', created: true, mirror_status: 'complete' });
-    expect(calls.some((url) => url.includes('/opportunities/o1'))).toBe(true);
+    expect(calls.some((url) => url.includes('/opportunities/o1'))).toBe(false);
+    expect(ensureProductionOpportunityMock).toHaveBeenCalledWith(expect.objectContaining({ salesOpportunityId: undefined }));
   });
 
-  it('sends exact won-status and signature-note GHL requests without a signing-time stage move', async () => {
+  it('binds a distinct Production ID while preserving the Sales opportunity provenance', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input); calls.push({ url, init });
+      if (url.includes('/rpc/create_job_from_proposal_token')) return new Response(JSON.stringify([{ job_id: 'j1', job_number: 'AF-1', created: true }]), { status: 200 });
+      if (url.includes('proposal_access_tokens') && init?.method !== 'PATCH') return new Response(JSON.stringify([{
+        contact_id: 'contact-1', proposal_id: 'sales-opp', sales_opportunity_id: 'sales-opp',
+        production_opportunity_id: null, opportunity_contract: 'separate_pending_v1', fence_spec: { proposal_total: 1000 },
+      }]), { status: 200 });
+      if (url.includes('proposal_access_tokens') && init?.method === 'PATCH') return new Response('[{}]', { status: 200 });
+      return new Response('{}', { status: 200 });
+    }));
+    ensureProductionOpportunityMock.mockResolvedValue('production-opp');
+
+    const response = await handler(request({ token }));
+
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ production_opportunity_id: 'production-opp' });
+    expect(ensureProductionOpportunityMock).toHaveBeenCalledWith({ contactId: 'contact-1', salesOpportunityId: 'sales-opp', monetaryValue: 1000 });
+    const bind = calls.find((call) => call.url.includes('proposal_access_tokens') && call.init?.method === 'PATCH');
+    expect(JSON.parse(String(bind?.init?.body))).toEqual({ production_opportunity_id: 'production-opp', opportunity_contract: 'separate_v1' });
+    expect(calls.some((call) => call.url.includes('/opportunities/sales-opp'))).toBe(false);
+  });
+
+  it('leaves Sales unchanged and sends only the signature note after binding Production', async () => {
     const ghlCalls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -55,18 +88,12 @@ describe('atomic proposal signing', () => {
     expect(res.status).toBe(201);
     // The pre-signing contact read is a GET; only the mirror mutates the CRM.
     const mutations = ghlCalls.filter(({ init }) => (init?.method ?? 'GET') !== 'GET');
-    expect(mutations).toHaveLength(2);
+    expect(mutations).toHaveLength(1);
     expect(mutations[0]).toMatchObject({
-      url: 'https://services.leadconnectorhq.com/opportunities/o1',
-      init: { method: 'PUT' },
-    });
-    expect(JSON.parse(String(mutations[0].init?.body))).toEqual({ status: 'won' });
-    expect(JSON.parse(String(mutations[0].init?.body))).not.toHaveProperty('pipelineStageId');
-    expect(mutations[1]).toMatchObject({
       url: 'https://services.leadconnectorhq.com/contacts/c1/notes',
       init: { method: 'POST' },
     });
-    expect(JSON.parse(String(mutations[1].init?.body))).toEqual({
+    expect(JSON.parse(String(mutations[0].init?.body))).toEqual({
       body: '[AUTO] Proposal signed — invoice pending\nProposal P-42\nDeposit due: $500',
     });
     expect(ghlCalls.some(({ url, init }) =>
@@ -94,7 +121,7 @@ describe('atomic proposal signing', () => {
     const second = await handler(request({ token: 'b'.repeat(64) }));
     expect(first.status).toBe(201); expect(second.status).toBe(200);
     expect(await second.json()).toMatchObject({ job_id: 'j1', created: false });
-    expect(ghlCalls).toBe(2);
+    expect(ghlCalls).toBe(1);
   });
 
   it('reports CRM non-2xx as observable partial failure', async () => {
@@ -127,15 +154,12 @@ describe('atomic proposal signing', () => {
       return new Response('{}', { status: 200 });
     }));
 
-    respond(false, []);
+    respond(false, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]);
     expect((await (await handler(request({ token }))).json()).mirror_status).toBe('skipped');
-
-    respond(true, []);
-    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_status: 'partial_failure', mirror_failures: ['token:lookup_failed'] });
 
     process.env.GHL_API_KEY = '';
     respond(true, [{ contact_id: 'c1', proposal_id: 'o1', fence_spec: { proposal_total: 1000 } }]);
-    expect(await (await handler(request({ token }))).json()).toMatchObject({ mirror_failures: ['crm:not_configured'] });
+    expect((await handler(request({ token }))).status).toBe(202);
   });
 
   it('refuses to sign a link whose price no longer matches the saved quote', async () => {

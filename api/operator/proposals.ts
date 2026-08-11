@@ -24,7 +24,18 @@ export default async function handler(req: Request) {
   if (!fenceSpec) return secureJson({ error: 'save the proposal before issuing a link' }, { status: 409 });
   const db = await supabaseRequest('proposal_access_tokens', {
     method: 'POST',
-    body: JSON.stringify({ token_hash: await sha256(raw), contact_id: body.contact_id, proposal_id: body.proposal_id, purpose: 'proposal_view_sign', fence_spec: fenceSpec, expires_at: new Date(Date.now() + ttl * 3600000).toISOString(), created_by: operator.sub }),
+    body: JSON.stringify({
+      token_hash: await sha256(raw),
+      contact_id: body.contact_id,
+      proposal_id: body.proposal_id,
+      sales_opportunity_id: body.proposal_id,
+      production_opportunity_id: null,
+      opportunity_contract: 'separate_pending_v1',
+      purpose: 'proposal_view_sign',
+      fence_spec: fenceSpec,
+      expires_at: new Date(Date.now() + ttl * 3600000).toISOString(),
+      created_by: operator.sub,
+    }),
   });
   if (!db.ok) return secureJson({ error: 'proposal token issuance failed' }, { status: 502 });
   return secureJson({ token: raw, expires_at: new Date(Date.now() + ttl * 3600000).toISOString() }, { status: 201 });

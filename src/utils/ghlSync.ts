@@ -1,18 +1,28 @@
 // src/utils/ghlSync.ts
 import { crmApi } from '../lib/crm-api';
-import { productionEnv } from '../lib/env';
 import { operatorFetch } from './actor';
 import type { Job } from '../types/production';
 
-interface JobWithOpp { proposal_id: string | null; contact_id: string; }
+interface JobWithOpp {
+  proposal_id: string | null;
+  production_opportunity_id: string | null;
+  opportunity_contract: 'legacy_single_v1' | 'separate_v1';
+  contact_id: string;
+}
 
-async function moveStage(opportunityId: string | null, stageId: string, label: string) {
+function stageOpportunity(job: JobWithOpp): string | null {
+  if (job.opportunity_contract === 'separate_v1') return job.production_opportunity_id;
+  if (job.opportunity_contract === 'legacy_single_v1') return job.proposal_id;
+  return null;
+}
+
+async function moveStage(opportunityId: string | null, stage: 'job_created' | 'scheduled' | 'in_install' | 'job_complete', label: string) {
   if (!opportunityId) {
     console.warn(`[ghlSync] ${label}: no opportunityId, skipping stage move`);
     return;
   }
   try {
-    await crmApi.moveOpportunityToStage(opportunityId, stageId);
+    await crmApi.moveOpportunityToStage(opportunityId, stage);
   } catch (err) {
     console.error(`[ghlSync] ${label} failed:`, err);
     // Swallow — never roll back Supabase. Hooks may schedule retry.
@@ -20,16 +30,16 @@ async function moveStage(opportunityId: string | null, stageId: string, label: s
 }
 
 export async function syncStageJobCreated(job: JobWithOpp) {
-  await moveStage(job.proposal_id, productionEnv.stages.job_created, 'syncStageJobCreated');
+  await moveStage(stageOpportunity(job), 'job_created', 'syncStageJobCreated');
 }
 export async function syncStageScheduled(job: JobWithOpp) {
-  await moveStage(job.proposal_id, productionEnv.stages.scheduled, 'syncStageScheduled');
+  await moveStage(stageOpportunity(job), 'scheduled', 'syncStageScheduled');
 }
 export async function syncStageInInstall(job: JobWithOpp) {
-  await moveStage(job.proposal_id, productionEnv.stages.in_install, 'syncStageInInstall');
+  await moveStage(stageOpportunity(job), 'in_install', 'syncStageInInstall');
 }
 export async function syncStageJobComplete(job: JobWithOpp) {
-  await moveStage(job.proposal_id, productionEnv.stages.job_complete, 'syncStageJobComplete');
+  await moveStage(stageOpportunity(job), 'job_complete', 'syncStageJobComplete');
 }
 
 export type OwnerAlert =

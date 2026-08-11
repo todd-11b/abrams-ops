@@ -28,7 +28,9 @@ vi.mock('./PhotosSection', () => ({ PhotosSection: () => null }));
 describe('ConsultApp draft timestamps', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
     localStorage.clear();
+    sessionStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -117,5 +119,35 @@ describe('ConsultApp draft timestamps', () => {
 
     expect(initialCalls).toBeGreaterThan(0);
     expect(randomUUID).toHaveBeenCalledTimes(initialCalls);
+  });
+
+  it('sends a proposal without a pipeline read or Sales opportunity stage/status mutation', async () => {
+    localStorage.setItem('abrams_drafts', JSON.stringify({
+      'contact-1': {
+        timestamp: 200,
+        form: { contactId: 'contact-1', opportunityId: 'sales-opp', contactName: 'Ready Customer' },
+      },
+    }));
+    sessionStorage.setItem('abrams_operator_session', JSON.stringify({
+      token: 'operator-token', actor: 'todd', expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      expect(String(input)).toBe('/api/operator/proposals');
+      return new Response(JSON.stringify({ token: 'proposal-token' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ConsultApp />);
+    fireEvent.click(await screen.findByText('Ready Customer'));
+    fireEvent.click(await screen.findByRole('button', { name: /continue to proposal/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Proposal' }));
+    await screen.findByRole('button', { name: 'Send to Customer' });
+
+    crmApi.updateOpportunityStatus.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Send to Customer' }));
+
+    await screen.findByRole('button', { name: 'Sent ✓' });
+    expect(crmApi.updateOpportunityStatus).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(['/api/operator/proposals']);
   });
 });

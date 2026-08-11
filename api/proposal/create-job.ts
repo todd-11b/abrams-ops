@@ -1,6 +1,7 @@
 import { secureJson } from '../_lib/operator-auth';
+import { ensureProductionOpportunity, ProductionOpportunityError } from '../_lib/production-opportunity';
 import { deriveFenceSpec, fetchGhlContact, readStoredProposal, specMatches, type FenceSpec } from '../_lib/proposal-source';
-import { serverEnv, sha256 } from '../_lib/server-data';
+import { serverEnv, sha256, supabaseRequest } from '../_lib/server-data';
 
 export const config = { runtime: 'edge' };
 const GHL_BASE = 'https://services.leadconnectorhq.com';
@@ -28,8 +29,16 @@ export default async function handler(req: Request) {
   try { env = serverEnv(); } catch { return secureJson({ error: 'server misconfigured' }, { status: 500 }); }
   const tokenHash = await sha256(body.token);
   const apiKey = process.env.GHL_API_KEY ?? '';
-  const lookup = await fetch(`${env.url}/rest/v1/proposal_access_tokens?token_hash=eq.${tokenHash}&select=contact_id,proposal_id,fence_spec`, { headers: { apikey: env.key, Authorization: `Bearer ${env.key}` } });
-  const [proposal] = lookup.ok ? await lookup.json() as Array<{ contact_id: string; proposal_id: string; fence_spec: FenceSpec | null }> : [];
+  const lookup = await fetch(`${env.url}/rest/v1/proposal_access_tokens?token_hash=eq.${tokenHash}&select=contact_id,proposal_id,sales_opportunity_id,production_opportunity_id,opportunity_contract,fence_spec`, { headers: { apikey: env.key, Authorization: `Bearer ${env.key}` } });
+  if (!lookup.ok) return secureJson({ error: 'proposal token lookup failed' }, { status: 502 });
+  const [proposal] = lookup.ok ? await lookup.json() as Array<{
+    contact_id: string;
+    proposal_id: string;
+    sales_opportunity_id: string;
+    production_opportunity_id: string | null;
+    opportunity_contract: 'legacy_single_v1' | 'separate_pending_v1' | 'separate_v1';
+    fence_spec: FenceSpec | null;
+  }> : [];
   // The job records the token's frozen price. If the operator has re-priced
   // the quote since, this link is superseded and must not be signed.
   if (proposal && apiKey) {
@@ -38,6 +47,26 @@ export default async function handler(req: Request) {
       return secureJson({ error: 'this proposal link is out of date — ask for a new one' }, { status: 409 });
     }
   }
+  if (!proposal) return secureJson({ error: 'proposal token invalid or expired' }, { status: 401 });
+  if (proposal.opportunity_contract === 'legacy_single_v1') {
+    return secureJson({ error: 'this legacy proposal link cannot create a separated Production job — ask for a new link' }, { status: 409 });
+  }
+  let productionOpportunityId: string;
+  try {
+    productionOpportunityId = proposal.production_opportunity_id ?? await ensureProductionOpportunity({
+      contactId: proposal.contact_id,
+      salesOpportunityId: proposal.sales_opportunity_id,
+      monetaryValue: proposal.fence_spec?.proposal_total,
+    });
+  } catch (error) {
+    const status = error instanceof ProductionOpportunityError ? error.status : 502;
+    return secureJson({ error: error instanceof Error ? error.message : 'Production opportunity creation failed' }, { status });
+  }
+  const bind = await supabaseRequest(`proposal_access_tokens?token_hash=eq.${tokenHash}&opportunity_contract=in.(separate_pending_v1,separate_v1)`, {
+    method: 'PATCH',
+    body: JSON.stringify({ production_opportunity_id: productionOpportunityId, opportunity_contract: 'separate_v1' }),
+  });
+  if (!bind.ok) return secureJson({ error: 'could not persist the Production opportunity boundary' }, { status: 502 });
   const rpc = await fetch(`${env.url}/rest/v1/rpc/create_job_from_proposal_token`, {
     method: 'POST',
     headers: { apikey: env.key, Authorization: `Bearer ${env.key}`, 'Content-Type': 'application/json' },
@@ -57,11 +86,10 @@ export default async function handler(req: Request) {
   const failures: string[] = [];
   // Only a duplicate signing has nothing to mirror; anything else that stops
   // the mirror on a genuinely new job is an observable failure, not a skip.
-  if (job.created && !proposal) failures.push('token:lookup_failed');
   if (job.created && !apiKey) failures.push('crm:not_configured');
   if (job.created && proposal && apiKey) {
-    const statusFailure = await ghl(`/opportunities/${encodeURIComponent(proposal.proposal_id)}`, apiKey, { method: 'PUT', body: JSON.stringify({ status: 'won' }) });
-    if (statusFailure) failures.push(`opportunity:${statusFailure}`);
+    // The Sales opportunity is immutable here. The newly bound Production
+    // opportunity already opens at Job Created; signing never moves Sales.
     // Deposit comes from the token's stored total, never from the signing request.
     const total = proposal.fence_spec?.proposal_total;
     const deposit = typeof total === 'number' && Number.isFinite(total) ? Math.round(total * 0.5) : null;
@@ -71,5 +99,5 @@ export default async function handler(req: Request) {
     if (noteFailure) failures.push(`note:${noteFailure}`);
   }
   const mirrorStatus = !job.created ? 'skipped' : failures.length ? 'partial_failure' : 'complete';
-  return secureJson({ ...job, mirror_status: mirrorStatus, mirror_failures: failures }, { status: failures.length ? 202 : (job.created ? 201 : 200) });
+  return secureJson({ ...job, production_opportunity_id: productionOpportunityId, mirror_status: mirrorStatus, mirror_failures: failures }, { status: failures.length ? 202 : (job.created ? 201 : 200) });
 }
