@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { buildQuoteForm, quotePayload, resolveStyle } from './_lib/form';
+import { buildQuoteForm, normalizeStyleQuery, quotePayload, resolveStyle } from './_lib/form';
 
 describe('quote-brain form', () => {
   it('resolves cedar aliases to wood_cedar_6', () => {
     expect(resolveStyle('cedar')?.key).toBe('wood_cedar_6');
     expect(resolveStyle("6' cedar")?.key).toBe('wood_cedar_6');
     expect(resolveStyle('wood_cedar_6')?.key).toBe('wood_cedar_6');
+    expect(normalizeStyleQuery('6 foot cedar')).toBe('6 ft cedar');
+    expect(resolveStyle('6 foot cedar')?.key).toBe('wood_cedar_6');
+    expect(resolveStyle('6ft cedar')?.key).toBe('wood_cedar_6');
   });
 
   it('prices 180 feet of 6-foot cedar with two walk gates', () => {

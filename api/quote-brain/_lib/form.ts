@@ -18,7 +18,7 @@ const STYLE_ALIASES: Record<string, string> = {
   cedar: 'wood_cedar_6',
   '6 cedar': 'wood_cedar_6',
   '6ft cedar': 'wood_cedar_6',
-  '6 foot cedar': 'wood_cedar_6',
+  '6 ft cedar': 'wood_cedar_6',
   'cedar dog ear': 'wood_cedar_6',
   pine: 'wood_pine_6',
   'treated pine': 'wood_pine_6',

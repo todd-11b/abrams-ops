@@ -7,17 +7,17 @@ Add an HTTP connector (or a tiny MCP wrapper) to:
 - `POST /api/quote-brain/get`
 - `GET /api/quote-brain/styles`
 
-Bearer token: `QUOTE_BRAIN_SECRET`.
+Bearer token: paste the live `QUOTE_BRAIN_SECRET` value. Do not ship a `{{placeholder}}`.
 
 Skill outline:
 
-When the owner says a fence style and footage, call `quote`. Speak `spoken`. Ask before `save`. Look up the contact with GHL's own tools. Never send invoices.
+When the owner says a fence style and footage, call `quote`. Speak `spoken`. Ask before `save`. Look up the contact with GHL's own tools (official MCP / Ask.ai contact search — not the quote brain). Never send invoices.
 
 Example:
 
 > Quote 180 feet of 6-foot cedar, two walk gates for Sarah.
 
-1. GHL search contact Sarah → `contactId`
+1. GHL search contact Sarah → `contactId` (GHL tool, not quote-brain)
 2. `quote` with style=cedar, linearFeet=180, walkGates=2
 3. Read the spoken total
 4. On confirm, `save` with that contactId
