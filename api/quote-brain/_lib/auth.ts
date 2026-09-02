@@ -1,5 +1,3 @@
-const encoder = new TextEncoder();
-
 function mismatch(expected: string, provided: string): boolean {
   if (expected.length !== provided.length) return true;
   let diff = 0;
@@ -34,5 +32,3 @@ export function json(body: unknown, init: ResponseInit = {}): Response {
 export function unauthorized(): Response {
   return json({ error: 'unauthorized' }, { status: 401 });
 }
-
-void encoder;
