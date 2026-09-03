@@ -1,5 +1,5 @@
 import { authorizeQuoteBrain, json, unauthorized } from './_lib/auth';
-import { buildQuoteForm, contactIdValid, listStyles, parseQuoteInput, quotePayload } from './_lib/form';
+import { buildQuoteForm, contactIdValid, listStyles, parseQuoteInput, quotePayload, saveBlockedByExistingRuns } from './_lib/form';
 import { loadContact, storedQuote, writeStoredQuote } from './_lib/ghl-quote';
 
 export const config = { runtime: 'edge' };
@@ -23,7 +23,10 @@ export default async function handler(req: Request) {
   if (!input.contactPhone) input.contactPhone = contact.phone;
   if (!input.contactEmail) input.contactEmail = contact.email;
   if (!input.propertyAddress) input.propertyAddress = contact.address1;
-  const built = buildQuoteForm(input, storedQuote(contact));
+  const existing = storedQuote(contact);
+  const blocked = saveBlockedByExistingRuns(existing, input.replace);
+  if (blocked) return json({ error: blocked, saved: false, runs: existing?.fenceLines?.length ?? 0 }, { status: 409 });
+  const built = buildQuoteForm(input, existing);
   if ('error' in built) return json({ error: built.error, styles: listStyles() }, { status: 400 });
   built.form.contactId = input.contactId;
   const written = await writeStoredQuote(input.contactId, built.form, apiKey);
