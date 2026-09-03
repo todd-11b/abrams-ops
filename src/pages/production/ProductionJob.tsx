@@ -21,7 +21,7 @@ import type {
 
 export default function ProductionJob() {
   const { jobId } = useParams<{ jobId: string }>();
-  const { job, spec, loading, setStage, block } = useJob(jobId);
+  const { job, spec, loading, setStage, block, unblock } = useJob(jobId);
   const { items, allDone, toggle, skip } = useChecklist(jobId);
 
   const [issueOpen, setIssueOpen] = useState(false);
@@ -122,10 +122,17 @@ export default function ProductionJob() {
         ))}
 
         <div className="grid grid-cols-2 gap-2 pt-2">
-          <button
-            onClick={() => setBlockOpen(true)}
-            className="px-4 py-3 border border-amber-500 text-amber-700 rounded-lg"
-          >Block Job</button>
+          {job.status === 'blocked' ? (
+            <button
+              onClick={() => { void unblock(); }}
+              className="px-4 py-3 border border-emerald-600 text-emerald-700 rounded-lg"
+            >Unblock Job</button>
+          ) : (
+            <button
+              onClick={() => setBlockOpen(true)}
+              className="px-4 py-3 border border-amber-500 text-amber-700 rounded-lg"
+            >Block Job</button>
+          )}
           <button
             disabled={!allDone}
             onClick={() => setCompleteOpen(true)}

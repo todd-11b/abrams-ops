@@ -179,7 +179,6 @@ export const FENCE_TYPE_OPTIONS = [
   "Vinyl",
   "Metal",
   "Chain Link",
-  "No-Dig",
   "Unsure",
 ];
 
