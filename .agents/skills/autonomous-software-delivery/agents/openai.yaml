@@ -1,0 +1,4 @@
+interface:
+  display_name: "Autonomous Software Delivery"
+  short_description: "Own authorized changes through verified release"
+  default_prompt: "Use $autonomous-software-delivery to plan and deliver this authorized software change through merge, deployment, and outcome verification."
